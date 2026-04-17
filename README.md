@@ -31,7 +31,8 @@ are authoritative.
 | Observability | OpenTelemetry via OTLP gRPC; Micrometer metrics; JSON logging |
 | Testing | JUnit 5, AssertJ, Testcontainers, RestAssured |
 
-Password hashing uses **Argon2id** via `de.mkammerer:argon2-jvm-nolibs`
+Password hashing uses **Argon2id** via
+[`com.password4j:password4j`](https://github.com/Password4j/password4j)
 (pure-Java, no JNI).
 
 ## Modules

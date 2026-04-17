@@ -65,10 +65,10 @@
       <scope>provided</scope>
     </dependency>
 
-    <!-- Argon2id password hashing -->
+    <!-- Argon2id password hashing (pure Java, no JNI) -->
     <dependency>
-      <groupId>de.mkammerer</groupId>
-      <artifactId>argon2-jvm-nolibs</artifactId>
+      <groupId>com.password4j</groupId>
+      <artifactId>password4j</artifactId>
     </dependency>
 
     <!-- Tests -->

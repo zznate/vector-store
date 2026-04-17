@@ -31,22 +31,26 @@ No non-resource class is intended for consumption by siblings other than
 
 - `vector-store-core` for the catalog records and repository interfaces.
 - Jakarta REST, Bean Validation, CDI, MicroProfile OpenAPI — all `provided`.
-- `de.mkammerer:argon2-jvm-nolibs` — the password hashing choice.
+- `com.password4j:password4j` — the password hashing choice.
 
 No dependency on `vector-store-engine`, `vector-store-storage`, or
 `vector-store-metadata`.
 
-### Password hashing: Argon2id via `argon2-jvm-nolibs`
+### Password hashing: Argon2id via `password4j`
 
-We chose Argon2id over BCrypt because:
+We chose Argon2id over BCrypt because Argon2 is OWASP's first-choice password
+KDF in 2025+ guidance. The implementation library is
+[`com.password4j:password4j`](https://github.com/Password4j/password4j)
+because it is genuinely pure Java (no JNI), small (~300 KB), actively
+maintained, and Apache 2.0 licensed.
 
-1. Argon2 is OWASP's first-choice password KDF in 2025+ guidance.
-2. The `-nolibs` artifact is pure Java — no JNI, no native dependencies, so
-   containerisation and test isolation are trivial.
-3. Apache License 2.0, actively maintained.
+An earlier pick of `de.mkammerer:argon2-jvm-nolibs` was abandoned: despite
+the name, that artifact still requires an OS-installed `libargon2` on the
+library path. `password4j` has no such requirement.
 
-Defaults: memory cost 65536 KiB, iterations 3, parallelism 1, salt 16 bytes.
-Override via `Argon2PasswordHasher` constructor parameters if needed.
+Defaults in `Argon2PasswordHasher`: output 32 bytes, salt 16 bytes, Argon2
+version 0x13. Memory, iterations, and parallelism are constructor parameters
+so tests run with cheap settings and production tunes per deployment.
 
 ## Local development
 

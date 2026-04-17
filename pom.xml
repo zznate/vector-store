@@ -55,7 +55,7 @@
     <jdbi.version>3.52.1</jdbi.version>
     <sqlite.jdbc.version>3.53.0.0</sqlite.jdbc.version>
     <quarkus.jdbc.sqlite.version>3.0.11</quarkus.jdbc.sqlite.version>
-    <argon2.version>2.12</argon2.version>
+    <password4j.version>1.8.4</password4j.version>
     <assertj.version>3.27.3</assertj.version>
 
     <!-- Plugin versions -->
@@ -123,11 +123,11 @@
         <version>${quarkus.jdbc.sqlite.version}</version>
       </dependency>
 
-      <!-- Argon2id password hashing (pure-Java, no JNI) -->
+      <!-- Argon2id password hashing via password4j (pure Java, no JNI) -->
       <dependency>
-        <groupId>de.mkammerer</groupId>
-        <artifactId>argon2-jvm-nolibs</artifactId>
-        <version>${argon2.version}</version>
+        <groupId>com.password4j</groupId>
+        <artifactId>password4j</artifactId>
+        <version>${password4j.version}</version>
       </dependency>
 
       <!-- AssertJ for expressive test assertions -->

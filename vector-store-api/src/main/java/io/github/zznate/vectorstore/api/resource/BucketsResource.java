@@ -1,5 +1,6 @@
 package io.github.zznate.vectorstore.api.resource;
 
+import io.github.zznate.vectorstore.api.auth.AdminOnly;
 import io.github.zznate.vectorstore.api.dto.BucketResponse;
 import io.github.zznate.vectorstore.api.dto.CreateBucketRequest;
 import io.github.zznate.vectorstore.api.error.BucketAlreadyExistsException;
@@ -26,8 +27,9 @@ import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 @Path("/v1/buckets")
-@Tag(name = "buckets", description = "Bucket lifecycle")
+@Tag(name = "buckets", description = "Bucket lifecycle (admin-only)")
 @ApplicationScoped
+@AdminOnly
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 public class BucketsResource {
