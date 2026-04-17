@@ -1,0 +1,286 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>io.github.zznate</groupId>
+  <artifactId>vector-store-parent</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <packaging>pom</packaging>
+
+  <name>vector-store-parent</name>
+  <description>
+    Multi-module parent for vector-store, a lightweight vector-database service
+    backed by JVector with segments persisted on S3-compatible object storage.
+  </description>
+  <url>https://github.com/zznate/vector-store</url>
+
+  <licenses>
+    <license>
+      <name>Apache License, Version 2.0</name>
+      <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+      <distribution>repo</distribution>
+    </license>
+  </licenses>
+
+  <scm>
+    <url>https://github.com/zznate/vector-store</url>
+    <connection>scm:git:https://github.com/zznate/vector-store.git</connection>
+    <developerConnection>scm:git:git@github.com:zznate/vector-store.git</developerConnection>
+  </scm>
+
+  <modules>
+    <module>vector-store-core</module>
+    <module>vector-store-api</module>
+    <module>vector-store-engine</module>
+    <module>vector-store-storage</module>
+    <module>vector-store-metadata</module>
+    <module>vector-store-app</module>
+  </modules>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+    <maven.compiler.release>21</maven.compiler.release>
+
+    <!-- Platform versions -->
+    <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
+    <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
+    <quarkus.platform.version>3.33.1</quarkus.platform.version>
+
+    <!-- Library versions -->
+    <!-- TODO: move to JVector 4.0.0 GA when released; currently tracking rc.8 -->
+    <jvector.version>4.0.0-rc.8</jvector.version>
+    <jdbi.version>3.52.1</jdbi.version>
+    <sqlite.jdbc.version>3.53.0.0</sqlite.jdbc.version>
+    <quarkus.jdbc.sqlite.version>3.0.11</quarkus.jdbc.sqlite.version>
+    <argon2.version>2.12</argon2.version>
+    <assertj.version>3.27.3</assertj.version>
+
+    <!-- Plugin versions -->
+    <maven.compiler.plugin.version>3.13.0</maven.compiler.plugin.version>
+    <maven.surefire.plugin.version>3.5.2</maven.surefire.plugin.version>
+    <maven.failsafe.plugin.version>3.5.2</maven.failsafe.plugin.version>
+    <maven.enforcer.plugin.version>3.5.0</maven.enforcer.plugin.version>
+    <maven.jar.plugin.version>3.4.2</maven.jar.plugin.version>
+    <build.helper.plugin.version>3.6.0</build.helper.plugin.version>
+
+    <!--
+      JVM flags required by JVector's Panama Vector API code path. Surefire
+      and Failsafe both apply these so tests exercise the SIMD path. Also
+      required at runtime via JAVA_TOOL_OPTIONS / container ENTRYPOINT.
+    -->
+    <vectorstore.test.jvm.args>--add-modules=jdk.incubator.vector --enable-native-access=ALL-UNNAMED</vectorstore.test.jvm.args>
+
+    <!-- Skip unnecessary steps in non-app modules by default -->
+    <skipITs>false</skipITs>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <!-- Quarkus platform BOM -->
+      <dependency>
+        <groupId>${quarkus.platform.group-id}</groupId>
+        <artifactId>${quarkus.platform.artifact-id}</artifactId>
+        <version>${quarkus.platform.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+
+      <!-- JDBI BOM -->
+      <dependency>
+        <groupId>org.jdbi</groupId>
+        <artifactId>jdbi3-bom</artifactId>
+        <version>${jdbi.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+
+      <!-- JVector -->
+      <dependency>
+        <groupId>io.github.jbellis</groupId>
+        <artifactId>jvector</artifactId>
+        <version>${jvector.version}</version>
+      </dependency>
+
+      <!-- SQLite JDBC driver (managed explicitly to stay current) -->
+      <dependency>
+        <groupId>org.xerial</groupId>
+        <artifactId>sqlite-jdbc</artifactId>
+        <version>${sqlite.jdbc.version}</version>
+      </dependency>
+
+      <!-- Quarkiverse SQLite Agroal integration -->
+      <dependency>
+        <groupId>io.quarkiverse.jdbc</groupId>
+        <artifactId>quarkus-jdbc-sqlite</artifactId>
+        <version>${quarkus.jdbc.sqlite.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.quarkiverse.jdbc</groupId>
+        <artifactId>quarkus-jdbc-sqlite-deployment</artifactId>
+        <version>${quarkus.jdbc.sqlite.version}</version>
+      </dependency>
+
+      <!-- Argon2id password hashing (pure-Java, no JNI) -->
+      <dependency>
+        <groupId>de.mkammerer</groupId>
+        <artifactId>argon2-jvm-nolibs</artifactId>
+        <version>${argon2.version}</version>
+      </dependency>
+
+      <!-- AssertJ for expressive test assertions -->
+      <dependency>
+        <groupId>org.assertj</groupId>
+        <artifactId>assertj-core</artifactId>
+        <version>${assertj.version}</version>
+        <scope>test</scope>
+      </dependency>
+
+      <!-- Internal modules -->
+      <dependency>
+        <groupId>io.github.zznate</groupId>
+        <artifactId>vector-store-core</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.github.zznate</groupId>
+        <artifactId>vector-store-api</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.github.zznate</groupId>
+        <artifactId>vector-store-engine</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.github.zznate</groupId>
+        <artifactId>vector-store-storage</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.github.zznate</groupId>
+        <artifactId>vector-store-metadata</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>${quarkus.platform.group-id}</groupId>
+          <artifactId>quarkus-maven-plugin</artifactId>
+          <version>${quarkus.platform.version}</version>
+          <extensions>true</extensions>
+          <executions>
+            <execution>
+              <goals>
+                <goal>build</goal>
+                <goal>generate-code</goal>
+                <goal>generate-code-tests</goal>
+              </goals>
+            </execution>
+          </executions>
+        </plugin>
+
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-compiler-plugin</artifactId>
+          <version>${maven.compiler.plugin.version}</version>
+          <configuration>
+            <release>${maven.compiler.release}</release>
+            <parameters>true</parameters>
+          </configuration>
+        </plugin>
+
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-surefire-plugin</artifactId>
+          <version>${maven.surefire.plugin.version}</version>
+          <configuration>
+            <argLine>${vectorstore.test.jvm.args}</argLine>
+            <systemPropertyVariables>
+              <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
+              <maven.home>${maven.home}</maven.home>
+            </systemPropertyVariables>
+          </configuration>
+        </plugin>
+
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-failsafe-plugin</artifactId>
+          <version>${maven.failsafe.plugin.version}</version>
+          <configuration>
+            <argLine>${vectorstore.test.jvm.args}</argLine>
+            <systemPropertyVariables>
+              <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
+              <maven.home>${maven.home}</maven.home>
+            </systemPropertyVariables>
+          </configuration>
+          <executions>
+            <execution>
+              <goals>
+                <goal>integration-test</goal>
+                <goal>verify</goal>
+              </goals>
+            </execution>
+          </executions>
+        </plugin>
+
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-jar-plugin</artifactId>
+          <version>${maven.jar.plugin.version}</version>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <version>${maven.enforcer.plugin.version}</version>
+        <executions>
+          <execution>
+            <id>enforce-toolchain</id>
+            <goals>
+              <goal>enforce</goal>
+            </goals>
+            <configuration>
+              <rules>
+                <requireJavaVersion>
+                  <version>[21,)</version>
+                  <message>vector-store requires JDK 21 or later.</message>
+                </requireJavaVersion>
+                <requireMavenVersion>
+                  <version>[3.9,)</version>
+                  <message>vector-store requires Maven 3.9 or later.</message>
+                </requireMavenVersion>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+
+  <profiles>
+    <profile>
+      <id>native</id>
+      <activation>
+        <property>
+          <name>native</name>
+        </property>
+      </activation>
+      <properties>
+        <quarkus.native.enabled>true</quarkus.native.enabled>
+        <quarkus.native.additional-build-args>
+          --add-modules=jdk.incubator.vector,--enable-native-access=ALL-UNNAMED
+        </quarkus.native.additional-build-args>
+      </properties>
+    </profile>
+  </profiles>
+</project>
