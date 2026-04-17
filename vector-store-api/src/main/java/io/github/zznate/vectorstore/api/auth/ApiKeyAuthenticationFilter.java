@@ -33,6 +33,7 @@ public class ApiKeyAuthenticationFilter implements ContainerRequestFilter {
 
   public static final String HEADER = "X-Api-Key";
   static final String BUCKET_PATH_PARAM = "bucket";
+  static final String PROTECTED_PATH_PREFIX = "v1/";
 
   private final ApiKeyRepository apiKeys;
   private final PasswordHasher hasher;
@@ -50,6 +51,10 @@ public class ApiKeyAuthenticationFilter implements ContainerRequestFilter {
 
   @Override
   public void filter(ContainerRequestContext ctx) {
+    if (!protectedPath(ctx)) {
+      // Health, metrics, OpenAPI and other management endpoints are public.
+      return;
+    }
     ApiKey key = authenticate(ctx);
     authorize(ctx, key);
     apiKeys.touchLastUsed(key.keyId(), clock.instant());
@@ -57,6 +62,14 @@ public class ApiKeyAuthenticationFilter implements ContainerRequestFilter {
         new VectorStoreSecurityContext(
             new BucketScopedPrincipal(key.keyId(), key.bucketId()),
             ctx.getSecurityContext() != null && ctx.getSecurityContext().isSecure()));
+  }
+
+  private static boolean protectedPath(ContainerRequestContext ctx) {
+    String path = ctx.getUriInfo().getPath();
+    if (path.startsWith("/")) {
+      path = path.substring(1);
+    }
+    return path.startsWith(PROTECTED_PATH_PREFIX) || "v1".equals(path);
   }
 
   private ApiKey authenticate(ContainerRequestContext ctx) {

@@ -157,6 +157,19 @@ class ApiKeyAuthenticationFilterTest {
   }
 
   @Test
+  void publicManagementPathBypassesAuthentication() {
+    ContainerRequestContext ctx = mock(ContainerRequestContext.class);
+    UriInfo uriInfo = mock(UriInfo.class);
+    when(uriInfo.getPath()).thenReturn("q/health");
+    when(ctx.getUriInfo()).thenReturn(uriInfo);
+
+    filter.resourceInfo = null;
+    filter.filter(ctx);
+
+    assertThat(apiKeys.touchCalls()).isEmpty();
+  }
+
+  @Test
   void successfulAuthenticationTouchesLastUsed() {
     ContainerRequestContext ctx =
         contextWith(
@@ -175,6 +188,7 @@ class ApiKeyAuthenticationFilterTest {
     ContainerRequestContext ctx = mock(ContainerRequestContext.class);
     when(ctx.getHeaderString(ApiKeyAuthenticationFilter.HEADER)).thenReturn(apiKeyHeader);
     UriInfo uriInfo = mock(UriInfo.class);
+    when(uriInfo.getPath()).thenReturn("v1/buckets");
     when(uriInfo.getPathParameters()).thenReturn(pathParams);
     when(ctx.getUriInfo()).thenReturn(uriInfo);
     when(ctx.getSecurityContext()).thenReturn(null);

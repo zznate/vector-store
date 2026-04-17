@@ -1,6 +1,5 @@
 package io.github.zznate.vectorstore.api.resource;
 
-import io.github.zznate.vectorstore.api.dto.CommitResponse;
 import io.github.zznate.vectorstore.api.dto.DeleteVectorsRequest;
 import io.github.zznate.vectorstore.api.dto.PutVectorsRequest;
 import io.github.zznate.vectorstore.api.dto.QueryRequest;
@@ -71,14 +70,6 @@ public class VectorsResource {
       @PathParam("index") String indexId,
       @PathParam("id") String id) {
     throw new NotImplementedException("vectors:get", 2);
-  }
-
-  @POST
-  @Path(":commit")
-  @Operation(summary = "Flush the write buffer to a new segment (deferred)")
-  public CommitResponse commit(
-      @PathParam("bucket") String bucketId, @PathParam("index") String indexId) {
-    throw new NotImplementedException("commit", 2);
   }
 
   @GET

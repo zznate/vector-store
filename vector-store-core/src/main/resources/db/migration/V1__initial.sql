@@ -9,7 +9,7 @@
 CREATE TABLE api_key (
   key_id        TEXT PRIMARY KEY,
   secret_hash   TEXT NOT NULL,
-  bucket_id     TEXT REFERENCES vector_bucket(bucket_id),  -- NULL = admin key
+  bucket_id     TEXT,                   -- NULL = admin key; soft reference
   created_at    TIMESTAMP NOT NULL,
   last_used_at  TIMESTAMP
 );
