@@ -36,7 +36,7 @@ attribute sidecar, tombstone bits AND-ed into the accept mask.
 
 `vector-store-core` has no internal dependencies. `vector-store-api`,
 `-engine`, `-storage`, and `-metadata` each depend only on `core`.
-`vector-store-app` depends on all five and owns the Quarkus runtime wiring.
+`vector-store-app` depends on all five and owns the Quarkus runtime wiring as the exposed HTTP service.
 
 | Module | Role | Status |
 |---|---|---|

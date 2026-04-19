@@ -56,6 +56,7 @@
     <sqlite.jdbc.version>3.53.0.0</sqlite.jdbc.version>
     <quarkus.jdbc.sqlite.version>3.0.11</quarkus.jdbc.sqlite.version>
     <password4j.version>1.8.4</password4j.version>
+    <uuid.creator.version>6.1.1</uuid.creator.version>
     <assertj.version>3.27.3</assertj.version>
 
     <!-- Plugin versions -->
@@ -128,6 +129,13 @@
         <groupId>com.password4j</groupId>
         <artifactId>password4j</artifactId>
         <version>${password4j.version}</version>
+      </dependency>
+
+      <!-- UUIDv7 generator for time-ordered segment IDs (RFC 9562) -->
+      <dependency>
+        <groupId>com.github.f4b6a3</groupId>
+        <artifactId>uuid-creator</artifactId>
+        <version>${uuid.creator.version}</version>
       </dependency>
 
       <!-- AssertJ for expressive test assertions -->

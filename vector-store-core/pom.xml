@@ -31,6 +31,23 @@
       <scope>provided</scope>
     </dependency>
 
+    <!--
+      JVector is a compile-time dependency of core because the SegmentStore
+      interface (defined in this module) returns a JVector RandomAccessReader.
+      No JVector code executes in core; the implementations live in the
+      engine and storage modules.
+    -->
+    <dependency>
+      <groupId>io.github.jbellis</groupId>
+      <artifactId>jvector</artifactId>
+    </dependency>
+
+    <!-- UUIDv7 generator for time-ordered segment IDs (RFC 9562). -->
+    <dependency>
+      <groupId>com.github.f4b6a3</groupId>
+      <artifactId>uuid-creator</artifactId>
+    </dependency>
+
     <!-- JDBI core + SQL Object + Jackson mapping -->
     <dependency>
       <groupId>org.jdbi</groupId>
