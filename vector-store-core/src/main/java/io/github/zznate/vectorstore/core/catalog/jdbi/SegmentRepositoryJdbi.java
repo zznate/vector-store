@@ -39,6 +39,12 @@ public class SegmentRepositoryJdbi implements SegmentRepository {
   }
 
   @Override
+  public void updateStateAndBytes(String segmentId, SegmentState state, long bytes) {
+    jdbi.useExtension(
+        SegmentDao.class, dao -> dao.updateStateAndBytes(segmentId, state, bytes));
+  }
+
+  @Override
   public void delete(String segmentId) {
     jdbi.useExtension(SegmentDao.class, dao -> dao.delete(segmentId));
   }

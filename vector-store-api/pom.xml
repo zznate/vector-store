@@ -22,6 +22,16 @@
       <groupId>io.github.zznate</groupId>
       <artifactId>vector-store-core</artifactId>
     </dependency>
+    <!--
+      api depends on engine for the coordinator interfaces the REST
+      resources call into (WriteBuffer, CommitCoordinator,
+      QueryCoordinator, Tombstones). See docs/design-notes.md for the
+      updated dependency rules.
+    -->
+    <dependency>
+      <groupId>io.github.zznate</groupId>
+      <artifactId>vector-store-engine</artifactId>
+    </dependency>
 
     <!-- Jakarta REST + Bean Validation + CDI annotations (Quarkus supplies impls) -->
     <dependency>

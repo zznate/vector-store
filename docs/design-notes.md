@@ -47,9 +47,14 @@ vector-store-parent/                  # Maven parent POM
 
 Dependency rules:
 
-- `api`, `engine`, `storage`, `metadata` depend on `core`.
+- `engine`, `storage`, `metadata` depend on `core`.
+- `api` depends on `core` and on `engine`. The REST resources need to
+  invoke the engine's coordinator surface (write buffer, commit pipeline,
+  query fan-out, tombstone set), and threading interfaces through `core`
+  for every call costs more than the direct dependency saves. Storage and
+  metadata stay below this line: `api` does not pull them in.
 - `app` depends on all other modules and owns runtime configuration.
-- No sibling-to-sibling module dependencies outside the above. No circular deps.
+- No other sibling-to-sibling module dependencies. No circular deps.
 - Shared types live in `core`. Do not create a `commons` dumping ground.
 
 ### Suggested Java package root

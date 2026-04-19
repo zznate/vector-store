@@ -2,12 +2,27 @@ package io.github.zznate.vectorstore.api.resource;
 
 import io.github.zznate.vectorstore.api.dto.DeleteVectorsRequest;
 import io.github.zznate.vectorstore.api.dto.PutVectorsRequest;
+import io.github.zznate.vectorstore.api.dto.PutVectorsResponse;
+import io.github.zznate.vectorstore.api.dto.QueryHit;
 import io.github.zznate.vectorstore.api.dto.QueryRequest;
 import io.github.zznate.vectorstore.api.dto.QueryResponse;
 import io.github.zznate.vectorstore.api.dto.StatsResponse;
-import io.github.zznate.vectorstore.api.dto.VectorResponse;
-import io.github.zznate.vectorstore.api.error.NotImplementedException;
+import io.github.zznate.vectorstore.api.dto.VectorInput;
+import io.github.zznate.vectorstore.api.dto.VectorLookupResponse;
+import io.github.zznate.vectorstore.api.error.DimensionMismatchException;
+import io.github.zznate.vectorstore.api.error.IndexNotFoundException;
+import io.github.zznate.vectorstore.core.catalog.manifest.ManifestResolver;
+import io.github.zznate.vectorstore.core.catalog.model.Segment;
+import io.github.zznate.vectorstore.core.catalog.model.VectorIndex;
+import io.github.zznate.vectorstore.core.catalog.repository.VectorIndexRepository;
+import io.github.zznate.vectorstore.engine.buffer.BufferEntry;
+import io.github.zznate.vectorstore.engine.buffer.WriteBuffer;
+import io.github.zznate.vectorstore.engine.search.QueryCoordinator;
+import io.github.zznate.vectorstore.engine.search.ScoredOrdinal;
+import io.github.zznate.vectorstore.engine.search.Searcher;
+import io.github.zznate.vectorstore.engine.tombstone.InMemoryTombstones;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import jakarta.validation.Valid;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.GET;
@@ -16,67 +31,135 @@ import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
-/**
- * All vector-level operations for an index. Every endpoint in this resource
- * is a 501 stub in prompt 01; the real implementations land in later prompts.
- * The URL template carries the fully-qualified index reference as two path
- * segments: {@code /v1/indexes/{bucket}/{index}}.
- */
 @Path("/v1/indexes/{bucket}/{index}")
-@Tag(name = "vectors", description = "Vector-level operations (stubbed in prompt 01)")
+@Tag(name = "vectors", description = "Vector-level operations")
 @ApplicationScoped
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 public class VectorsResource {
 
+  private final VectorIndexRepository indexes;
+  private final WriteBuffer writeBuffer;
+  private final QueryCoordinator queryCoordinator;
+  private final Searcher searcher;
+  private final InMemoryTombstones tombstones;
+  private final ManifestResolver manifestResolver;
+
+  @Inject
+  public VectorsResource(
+      VectorIndexRepository indexes,
+      WriteBuffer writeBuffer,
+      QueryCoordinator queryCoordinator,
+      Searcher searcher,
+      InMemoryTombstones tombstones,
+      ManifestResolver manifestResolver) {
+    this.indexes = indexes;
+    this.writeBuffer = writeBuffer;
+    this.queryCoordinator = queryCoordinator;
+    this.searcher = searcher;
+    this.tombstones = tombstones;
+    this.manifestResolver = manifestResolver;
+  }
+
   @POST
   @Path("/vectors:put")
-  @Operation(summary = "Upsert vectors into the write buffer (deferred)")
-  public VectorResponse putVectors(
+  @Operation(summary = "Upsert vectors into the write buffer")
+  public Response putVectors(
       @PathParam("bucket") String bucketId,
       @PathParam("index") String indexId,
       @Valid PutVectorsRequest request) {
-    throw new NotImplementedException("vectors:put", 2);
+    VectorIndex index = requireIndex(bucketId, indexId);
+    List<VectorInput> incoming = request.vectors();
+    List<BufferEntry> batch = new ArrayList<>(incoming.size());
+    for (VectorInput input : incoming) {
+      if (input.vector().length != index.dimension()) {
+        throw new DimensionMismatchException(
+            index.indexId(), index.dimension(), input.vector().length);
+      }
+      batch.add(new BufferEntry(input.id(), input.vector(), input.attributes()));
+    }
+    writeBuffer.append(index.indexId(), batch);
+    return Response.status(Response.Status.ACCEPTED)
+        .entity(new PutVectorsResponse(batch.size(), writeBuffer.size(index.indexId())))
+        .build();
   }
 
   @POST
   @Path("/vectors:query")
-  @Operation(summary = "kNN query with optional filter (deferred)")
+  @Operation(summary = "kNN query over the active manifest")
   public QueryResponse queryVectors(
       @PathParam("bucket") String bucketId,
       @PathParam("index") String indexId,
       @Valid QueryRequest request) {
-    throw new NotImplementedException("vectors:query", 2);
+    VectorIndex index = requireIndex(bucketId, indexId);
+    if (request.vector().length != index.dimension()) {
+      throw new DimensionMismatchException(
+          index.indexId(), index.dimension(), request.vector().length);
+    }
+    List<ScoredOrdinal> hits =
+        queryCoordinator.query(index.indexId(), request.vector(), request.topK());
+    List<QueryHit> mapped = new ArrayList<>(hits.size());
+    for (ScoredOrdinal hit : hits) {
+      mapped.add(new QueryHit(hit.userId(), hit.score(), Map.of()));
+    }
+    return new QueryResponse(mapped);
   }
 
   @POST
   @Path("/vectors:delete")
-  @Operation(summary = "Tombstone vectors (deferred)")
-  public VectorResponse deleteVectors(
+  @Operation(summary = "Tombstone vectors by user id")
+  public Response deleteVectors(
       @PathParam("bucket") String bucketId,
       @PathParam("index") String indexId,
       @Valid DeleteVectorsRequest request) {
-    throw new NotImplementedException("vectors:delete", 4);
+    VectorIndex index = requireIndex(bucketId, indexId);
+    tombstones.tombstone(index.indexId(), request.ids());
+    return Response.noContent().build();
   }
 
   @GET
   @Path("/vectors/{id}")
-  @Operation(summary = "Get a specific vector with attributes (deferred)")
-  public VectorResponse getVector(
+  @Operation(summary = "Report whether a vector id is visible in the active manifest")
+  public VectorLookupResponse getVector(
       @PathParam("bucket") String bucketId,
       @PathParam("index") String indexId,
       @PathParam("id") String id) {
-    throw new NotImplementedException("vectors:get", 2);
+    VectorIndex index = requireIndex(bucketId, indexId);
+    if (tombstones.isTombstoned(index.indexId(), id)) {
+      return new VectorLookupResponse(id, false);
+    }
+    for (Segment segment : manifestResolver.activeSegments(index.indexId())) {
+      if (searcher.contains(segment, id)) {
+        return new VectorLookupResponse(id, true);
+      }
+    }
+    return new VectorLookupResponse(id, false);
   }
 
   @GET
   @Path("/stats")
-  @Operation(summary = "Stats for an index (deferred)")
+  @Operation(summary = "Current active manifest stats + pending buffer size")
   public StatsResponse stats(
       @PathParam("bucket") String bucketId, @PathParam("index") String indexId) {
-    throw new NotImplementedException("stats", 2);
+    VectorIndex index = requireIndex(bucketId, indexId);
+    List<Segment> active = manifestResolver.activeSegments(index.indexId());
+    long vectorCount = active.stream().mapToLong(Segment::vectorCount).sum();
+    long totalBytes = active.stream().mapToLong(Segment::bytes).sum();
+    int pending = writeBuffer.size(index.indexId());
+    return new StatsResponse(active.size(), vectorCount, totalBytes, pending);
+  }
+
+  private VectorIndex requireIndex(String bucketId, String indexId) {
+    String qualified = bucketId + "/" + indexId;
+    return indexes
+        .findById(qualified)
+        .orElseThrow(() -> new IndexNotFoundException(qualified));
   }
 }

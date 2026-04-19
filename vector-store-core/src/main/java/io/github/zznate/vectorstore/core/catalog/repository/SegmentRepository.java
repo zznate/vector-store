@@ -15,5 +15,12 @@ public interface SegmentRepository {
 
   void updateState(String segmentId, SegmentState state);
 
+  /**
+   * Update both the segment's {@code state} and its recorded on-disk
+   * {@code bytes} in a single statement. Used at the end of a successful
+   * commit when the builder's actual byte count is finally known.
+   */
+  void updateStateAndBytes(String segmentId, SegmentState state, long bytes);
+
   void delete(String segmentId);
 }

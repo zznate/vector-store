@@ -43,6 +43,13 @@ interface SegmentDao {
   @SqlUpdate("UPDATE segment SET state = :state WHERE segment_id = :segmentId")
   void updateState(@Bind("segmentId") String segmentId, @Bind("state") SegmentState state);
 
+  @SqlUpdate(
+      "UPDATE segment SET state = :state, bytes = :bytes WHERE segment_id = :segmentId")
+  void updateStateAndBytes(
+      @Bind("segmentId") String segmentId,
+      @Bind("state") SegmentState state,
+      @Bind("bytes") long bytes);
+
   @SqlUpdate("DELETE FROM segment WHERE segment_id = :segmentId")
   void delete(@Bind("segmentId") String segmentId);
 }

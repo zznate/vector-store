@@ -1,5 +1,10 @@
 package io.github.zznate.vectorstore.core.catalog.model;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.Map;
+
 /**
  * Tunable JVector parameters for a given index. Stored as JSON in the
  * {@code vector_index.engine_params} column and consumed by the engine's
@@ -85,5 +90,47 @@ public record IndexBuildParams(
    */
   public static IndexBuildParams defaults() {
     return new IndexBuildParams(32, 200, 1.2f, 1.2f, 128, 256, false);
+  }
+
+  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
+
+  /** Canonical JSON form stored in {@code vector_index.engine_params}. */
+  public String toJson() {
+    try {
+      return MAPPER.writeValueAsString(this);
+    } catch (JsonProcessingException e) {
+      throw new IllegalStateException("unable to serialise IndexBuildParams", e);
+    }
+  }
+
+  /** Inverse of {@link #toJson()}. Returns defaults for null / blank input. */
+  public static IndexBuildParams fromJson(String json) {
+    if (json == null || json.isBlank()) {
+      return defaults();
+    }
+    try {
+      return MAPPER.readValue(json, IndexBuildParams.class);
+    } catch (JsonProcessingException e) {
+      throw new IllegalStateException("unable to parse IndexBuildParams JSON: " + json, e);
+    }
+  }
+
+  /**
+   * Build an instance by merging the caller's {@code overrides} map over
+   * {@link #defaults()}. Unknown keys are ignored. {@code null} and empty
+   * maps return defaults verbatim.
+   */
+  public static IndexBuildParams fromOverrides(Map<String, Object> overrides) {
+    Map<String, Object> merged = MAPPER.convertValue(defaults(), MAP_TYPE);
+    if (overrides != null && !overrides.isEmpty()) {
+      merged.putAll(overrides);
+    }
+    return MAPPER.convertValue(merged, IndexBuildParams.class);
+  }
+
+  /** Projection back to a {@code Map<String,Object>} for REST responses. */
+  public Map<String, Object> toMap() {
+    return MAPPER.convertValue(this, MAP_TYPE);
   }
 }

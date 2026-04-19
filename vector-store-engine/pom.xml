@@ -13,14 +13,66 @@
   <artifactId>vector-store-engine</artifactId>
   <name>vector-store-engine</name>
   <description>
-    JVector adapter for vector-store: builder orchestration, on-disk writer,
-    searcher. Populated in prompt 02.
+    JVector adapter for vector-store: write buffer, segment builder,
+    segment store (local disk), searcher, query coordinator.
   </description>
 
   <dependencies>
     <dependency>
       <groupId>io.github.zznate</groupId>
       <artifactId>vector-store-core</artifactId>
+    </dependency>
+
+    <!-- JVector comes transitively via core; declare explicitly for clarity. -->
+    <dependency>
+      <groupId>io.github.jbellis</groupId>
+      <artifactId>jvector</artifactId>
+    </dependency>
+
+    <!-- CDI + Jackson for engine beans and sidecar serialization. -->
+    <dependency>
+      <groupId>jakarta.enterprise</groupId>
+      <artifactId>jakarta.enterprise.cdi-api</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>jakarta.inject</groupId>
+      <artifactId>jakarta.inject-api</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.datatype</groupId>
+      <artifactId>jackson-datatype-jsr310</artifactId>
+      <scope>provided</scope>
+    </dependency>
+
+    <!-- Observability: Micrometer + OTel are supplied at runtime by the app. -->
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-core</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.opentelemetry</groupId>
+      <artifactId>opentelemetry-api</artifactId>
+      <scope>provided</scope>
+    </dependency>
+
+    <!-- Tests -->
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
     </dependency>
   </dependencies>
 </project>

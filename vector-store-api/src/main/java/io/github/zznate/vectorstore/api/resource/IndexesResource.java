@@ -128,24 +128,17 @@ public class IndexesResource {
         index.createdAt());
   }
 
-  private String writeEngineParams(Map<String, Object> params) {
-    Map<String, Object> source = params == null ? Map.of() : params;
-    try {
-      return objectMapper.writeValueAsString(source);
-    } catch (JsonProcessingException e) {
-      throw new IllegalArgumentException("engineParams could not be serialized", e);
-    }
+  private String writeEngineParams(Map<String, Object> userOverrides) {
+    // Merge user input with IndexBuildParams defaults, then persist the
+    // canonical typed form. Storing the merged result means every later
+    // read gets the full parameter set without re-applying defaults.
+    return io.github.zznate.vectorstore.core.catalog.model.IndexBuildParams.fromOverrides(
+            userOverrides)
+        .toJson();
   }
 
   private Map<String, Object> readEngineParams(String json) {
-    if (json == null || json.isBlank()) {
-      return Map.of();
-    }
-    try {
-      return objectMapper.readValue(json, MAP_TYPE);
-    } catch (JsonProcessingException e) {
-      throw new IllegalStateException("stored engineParams could not be parsed", e);
-    }
+    return io.github.zznate.vectorstore.core.catalog.model.IndexBuildParams.fromJson(json).toMap();
   }
 
   private static String qualify(String bucketId, String indexId) {
