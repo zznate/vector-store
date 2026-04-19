@@ -1,66 +1,98 @@
 # vector-store-api
 
-## Purpose
+Public REST surface of the vector-store service — DTOs, resources, exception
+hierarchy, and API-key authentication. See the
+[repo root README](../README.md) for the project overview and
+[`docs/design-notes.md`](../docs/design-notes.md) for the authoritative
+URL shape and observability plan.
 
-Public REST surface of the vector-store service. Everything a client sees — URL
-shapes, DTOs, error envelopes, API-key authentication — is defined in this
-module. The module is JAX-RS against `provided` Jakarta APIs; the Quarkus
-runtime in `vector-store-app` supplies the implementations.
+## Role
 
-Owns:
+Everything a client sees comes from this module: URL templates, request and
+response shapes, the `{error, message}` envelope, and the `X-Api-Key` auth
+flow. It is plain Jakarta EE against `provided` APIs; the Quarkus runtime in
+[`vector-store-app`](../vector-store-app/README.md) supplies the
+implementations and wires the CDI beans.
 
-- Resource classes under `resource/` — one per top-level noun
-  (`BucketsResource`, `IndexesResource`, `VectorsResource`).
-- DTOs under `dto/` — all records, all with Bean Validation annotations.
-- `VectorStoreException` hierarchy plus a single `@Provider` exception mapper
-  in `error/`.
-- API-key authentication under `auth/`:
-  `ApiKeyAuthenticationFilter`, `BucketScopedPrincipal`, and
-  `Argon2PasswordHasher` (the only implementation of `PasswordHasher`).
+## Public surface
 
-## Public contract
+Organised under `io.github.zznate.vectorstore.api`:
 
-- The HTTP surface itself (see [`docs/design-notes.md`](../docs/design-notes.md)).
-- The `PasswordHasher` interface for the app module's startup bootstrap bean.
-- The `BucketScopedPrincipal` type visible on `SecurityContext.getUserPrincipal()`.
+- [`resource/`](src/main/java/io/github/zznate/vectorstore/api/resource) —
+  JAX-RS endpoints.
 
-No non-resource class is intended for consumption by siblings other than
-`vector-store-app`.
+  | Class | Path prefix | Phase 1 status |
+  |---|---|---|
+  | `BucketsResource` | `/v1/buckets` — admin-only | full CRUD |
+  | `IndexesResource` | `/v1/buckets/{bucket}/indexes` | full CRUD |
+  | `VectorsResource` | `/v1/indexes/{bucket}/{index}` | six 501 stubs, real impls land in prompts 02 / 04 |
+  | `CommitResource` | `/v1/indexes/{bucket}/{index}:commit` | 501 stub, real impl lands in prompt 02 |
+
+  `CommitResource` lives separately because attaching `:commit` directly to
+  the `{index}` path parameter on a class shared with `/vectors:put`-style
+  siblings caused Quarkus REST's URI-template matcher to drop the route.
+  Isolating it onto its own class-level template keeps routing
+  deterministic.
+
+- [`dto/`](src/main/java/io/github/zznate/vectorstore/api/dto) —
+  request / response records with Bean Validation. `ErrorResponse` is the
+  envelope every non-2xx response carries.
+
+- [`error/`](src/main/java/io/github/zznate/vectorstore/api/error) —
+  sealed `VectorStoreException` hierarchy with eight permitted subclasses
+  covering 401 / 403 / 404 / 409 / 501, plus the single
+  `@Provider VectorStoreExceptionMapper` that renders the `ErrorResponse`.
+
+- [`auth/`](src/main/java/io/github/zznate/vectorstore/api/auth) —
+  `PasswordHasher` (interface) and `Argon2PasswordHasher` (pure-Java
+  Argon2id, constructor-tunable), `BucketScopedPrincipal` /
+  `VectorStoreSecurityContext`, the `@AdminOnly` annotation, and the
+  `ApiKeyAuthenticationFilter` (`@Provider`, `AUTHENTICATION` priority).
+
+### Authentication
+
+- Token format: `keyId.secret`, carried in `X-Api-Key`.
+- Filter scope:
+  - `/q/*` management endpoints are public (no auth).
+  - Resources or methods annotated `@AdminOnly` require an admin key
+    (`bucketId IS NULL`).
+  - Anything else with a `{bucket}` path parameter accepts an admin key or a
+    key scoped to the matched bucket.
+- `last_used_at` is touched on every successful authentication via
+  `ApiKeyRepository.touchLastUsed`.
+- Password hashing is Argon2id via
+  [`com.password4j:password4j`](https://github.com/Password4j/password4j) —
+  pure Java, no JNI, Apache 2.0. Salt 16 bytes, output 32 bytes, version
+  `0x13`. Memory / iterations / parallelism come from
+  `vectorstore.auth.argon2.*` config keys (see
+  [`vector-store-app`](../vector-store-app/README.md)).
 
 ## Dependencies
 
-- `vector-store-core` for the catalog records and repository interfaces.
+- [`vector-store-core`](../vector-store-core/README.md) for the catalog
+  records and repository interfaces.
 - Jakarta REST, Bean Validation, CDI, MicroProfile OpenAPI — all `provided`.
-- `com.password4j:password4j` — the password hashing choice.
+- `com.fasterxml.jackson.core:jackson-databind` (`provided`) for
+  round-tripping the `engine_params` JSON blob.
+- `com.password4j:password4j` — the hashing implementation.
 
-No dependency on `vector-store-engine`, `vector-store-storage`, or
-`vector-store-metadata`.
-
-### Password hashing: Argon2id via `password4j`
-
-We chose Argon2id over BCrypt because Argon2 is OWASP's first-choice password
-KDF in 2025+ guidance. The implementation library is
-[`com.password4j:password4j`](https://github.com/Password4j/password4j)
-because it is genuinely pure Java (no JNI), small (~300 KB), actively
-maintained, and Apache 2.0 licensed.
-
-An earlier pick of `de.mkammerer:argon2-jvm-nolibs` was abandoned: despite
-the name, that artifact still requires an OS-installed `libargon2` on the
-library path. `password4j` has no such requirement.
-
-Defaults in `Argon2PasswordHasher`: output 32 bytes, salt 16 bytes, Argon2
-version 0x13. Memory, iterations, and parallelism are constructor parameters
-so tests run with cheap settings and production tunes per deployment.
+No dependency on `vector-store-engine`, `-storage`, or `-metadata`.
 
 ## Local development
 
-- Unit-test this module on its own: `./mvnw -pl vector-store-api test`. Those
-  tests cover hashing and filter scope logic against a fake
-  `ApiKeyRepository`.
-- End-to-end resource behaviour is covered by `@QuarkusTest` suites in
-  `vector-store-app`, which boot the full Quarkus runtime.
+- Unit tests: `./mvnw -pl vector-store-api test`. They cover the hashing
+  round-trip, the exception hierarchy's status / error-code invariants, and
+  the filter's auth + scope logic against a fake `ApiKeyRepository`
+  ([`InMemoryApiKeyRepository`](src/test/java/io/github/zznate/vectorstore/api/auth/fakes/InMemoryApiKeyRepository.java)).
+- End-to-end resource behaviour is covered by the `@QuarkusTest` component
+  tests in [`vector-store-app`](../vector-store-app/README.md), which boot
+  the full Quarkus runtime.
 
 ## Not in this module
 
-- No JDBI, no SQL. SQL lives in `vector-store-core`.
-- No vector / index engine work. That belongs in `vector-store-engine`.
+- No SQL or JDBI — those live in
+  [`vector-store-core`](../vector-store-core/README.md).
+- No index-engine code — that is
+  [`vector-store-engine`](../vector-store-engine/README.md).
+- No Quarkus bootstrap, `application.properties`, or CDI producers — those
+  belong to [`vector-store-app`](../vector-store-app/README.md).

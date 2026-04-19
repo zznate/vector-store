@@ -1,60 +1,70 @@
 # vector-store-core
 
-## Purpose
+Domain records + catalog data-access for the vector-store service. See the
+[repo root README](../README.md) for the project overview and
+[`docs/design-notes.md`](../docs/design-notes.md) for the authoritative
+catalog schema and invariants.
 
-Domain model and the catalog data-access layer for vector-store. Everything in
-this module is framework-light so it can be exercised in plain JUnit tests
-without needing Quarkus runtime bootstrap.
+## Role
 
-Owns:
+`core` is the foundation every other module builds on. It owns the persisted
+shape of the world (records + SQL schema) and the data-access seam
+(repository interfaces + JDBI implementations). It deliberately stays
+framework-light — CDI annotations only — so it can be unit-tested in plain
+JUnit without booting Quarkus.
 
-- Immutable record types for every catalog entity: `Bucket`, `VectorIndex`,
-  `Segment`, `ManifestVersion`, `ApiKey`.
-- Repository interfaces under `catalog.repository` — the abstraction the rest of
-  the codebase consumes.
-- JDBI 3 SQL Object implementations under `catalog.jdbi` — SQL lives in
-  annotations on the SQL objects, not concatenated strings.
-- Flyway migrations under `src/main/resources/db/migration/`. The catalog
-  schema from `docs/design-notes.md` is authoritative — `V1__initial.sql`
-  must match it.
+`-api`, `-engine`, `-storage`, and `-metadata` each depend only on this
+module. `core` depends on no sibling.
 
-## Public contract
+## Public surface
 
-The five repository interfaces:
+Every caller outside this module consumes one of:
 
-- `BucketRepository`
-- `VectorIndexRepository`
-- `SegmentRepository`
-- `ManifestVersionRepository`
-- `ApiKeyRepository`
+- Record types in [`catalog.model`](src/main/java/io/github/zznate/vectorstore/core/catalog/model):
+  `Bucket`, `VectorIndex`, `Segment`, `ManifestVersion`, `ApiKey`,
+  plus the `DistanceMetric` and `SegmentState` enums. All immutable; only
+  persisted fields, no derived state.
+- Repository interfaces in [`catalog.repository`](src/main/java/io/github/zznate/vectorstore/core/catalog/repository):
+  `BucketRepository`, `VectorIndexRepository`, `SegmentRepository`,
+  `ManifestVersionRepository`, `ApiKeyRepository`.
 
-All callers outside this module go through these interfaces; nothing should
-reach for the JDBI implementations directly.
+JDBI-backed implementations live in
+[`catalog.jdbi`](src/main/java/io/github/zznate/vectorstore/core/catalog/jdbi) —
+package-private by convention, not intended for direct use. They are wired
+into CDI by producers in
+[`vector-store-app`](../vector-store-app/README.md).
 
-The five record types are also public. They are immutable and include only
-persisted fields — no transient or derived state.
+`JdbiConfigurer.configure(Jdbi)` centralises the plugin + column-matcher
+setup that both the production app and this module's test fixture apply, so
+the mapping rules never drift apart.
 
 ## Dependencies
 
-- `jakarta.enterprise.cdi-api` and `jakarta.inject-api` are `provided`. The
-  Quarkus runtime in `vector-store-app` supplies them.
-- `org.jdbi:jdbi3-core` and `jdbi3-sqlobject` — the data-access engine.
-- `org.flywaydb:flyway-core` — so the migration files ship with the module even
-  when Flyway execution itself is driven by the `app` module.
+- `org.jdbi:jdbi3-core`, `jdbi3-sqlobject`, `jdbi3-jackson2` — data access.
+- `org.flywaydb:flyway-core` — so the migration files travel with this
+  module. Execution itself is driven by the `app` module's Quarkus
+  configuration.
+- `jakarta.enterprise.cdi-api` and `jakarta.inject-api` at `provided` scope
+  — the runtime supplies the implementations.
 
 No dependency on any sibling module.
 
 ## Local development
 
-- Run just this module's tests: `./mvnw -pl vector-store-core test`
-- Tests use an in-memory SQLite URL (`jdbc:sqlite::memory:`) with Flyway
-  migrations applied in setup. Each test class should obtain its own JDBI
-  instance — SQLite's in-memory database is per-connection by default.
+- Run this module's tests: `./mvnw -pl vector-store-core test`.
+- The test fixture
+  ([`CatalogTestFixture`](src/test/java/io/github/zznate/vectorstore/core/testsupport/CatalogTestFixture.java))
+  builds a per-test-class **temp-file SQLite database**, runs Flyway, and
+  exposes a configured `Jdbi`. File-backed rather than `:memory:` because
+  SQLite's in-memory mode gives each JDBC connection its own database, and
+  Flyway would migrate a different DB than the test's `Jdbi`.
 
 ## Not in this module
 
-- No HTTP, no REST, no JAX-RS.
-- No JVector, no S3.
-- No Quarkus extensions beyond the CDI annotations `provided` above. If you
-  find yourself reaching for `@QuarkusTest` or `ConfigProperty` here, it
-  belongs in `vector-store-app`.
+- No HTTP, REST, JAX-RS, or JSON marshalling — see
+  [`vector-store-api`](../vector-store-api/README.md).
+- No JVector, S3, filter compilation — those arrive in later prompts in the
+  dedicated sibling modules.
+- No Quarkus extensions beyond the CDI annotations above. Reaching for
+  `@QuarkusTest` or `ConfigProperty` here is a sign the code belongs in
+  [`vector-store-app`](../vector-store-app/README.md).

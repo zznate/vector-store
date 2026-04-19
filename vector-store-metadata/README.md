@@ -1,37 +1,47 @@
 # vector-store-metadata
 
-## Purpose
+Per-segment attribute sidecar, tombstone bitmap, and filter compiler. See
+the [repo root README](../README.md) and
+[`docs/design-notes.md`](../docs/design-notes.md) for the filter grammar
+and the "deletes are tombstone bits" invariant.
 
-Per-segment attribute storage and the filter compiler. The attribute sidecar
-is JSON Lines in Phase 1; the compiler translates a filter spec into a `Bits`
-mask that the JVector searcher accepts.
+## Status
 
-Also owns the tombstone bitmap (RoaringBitmap) and its AND-into-mask logic —
-deletes never rewrite the graph file.
+**Empty shell** in Phase 1's bootstrap prompt. Contains only a
+`package-info.java`. Real content lands in **prompt 04 (filters)**.
 
-Currently an empty shell. Populated in **prompt 04 (filters)**.
+## Role (when populated)
 
-## Public contract
+Owns the non-vector state attached to each segment: the attribute sidecar
+(JSON Lines in Phase 1), the tombstone bitmap (RoaringBitmap), and the
+compiler that turns a filter spec into a `Bits` accept mask the JVector
+searcher can consume. Per the Phase 1 invariants in `docs/design-notes.md`,
+deletes are tombstone bits — the graph file is never rewritten.
 
-To be defined in prompt 04. The surface will include:
+## Public surface (planned)
 
-- An `AttributeSidecar` reader / writer.
-- A `FilterCompiler` that takes a filter DSL and a segment context and returns
-  a `Bits` accept mask.
-- A `TombstoneBitmap` type.
+Defined in prompt 04. Expected entry points: an `AttributeSidecar` reader /
+writer, a `FilterCompiler` that emits a `Bits` mask, and a `TombstoneBitmap`
+type. The filter predicate format evolves independently of the graph in
+Phase 2.
 
 ## Dependencies
 
-- `vector-store-core` for the domain model.
+- [`vector-store-core`](../vector-store-core/README.md) for the domain
+  model.
 - `org.roaringbitmap:RoaringBitmap` — arrives in prompt 04.
 - `com.fasterxml.jackson.core:jackson-databind` — arrives in prompt 04.
 
 ## Local development
 
-Nothing to run yet. Prompt 04 introduces unit tests for sidecar round-trips
-and filter compilation against a seeded dataset.
+Nothing to run yet. Prompt 04 adds unit tests for sidecar round-trips and
+filter compilation against a seeded dataset.
 
 ## Not in this module
 
-- No JVector graph construction. That stays in `vector-store-engine`.
-- No object-store I/O. That stays in `vector-store-storage`.
+- No JVector graph construction — see
+  [`vector-store-engine`](../vector-store-engine/README.md).
+- No object-store I/O — see
+  [`vector-store-storage`](../vector-store-storage/README.md).
+- No HTTP / REST — see
+  [`vector-store-api`](../vector-store-api/README.md).

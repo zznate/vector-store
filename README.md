@@ -1,22 +1,51 @@
 # vector-store
 
-A lightweight vector-database service. Its public surface is "create a bucket,
-create an index, upsert vectors with attributes, query by similarity with filters,
-delete." The index is powered by [JVector](https://github.com/datastax/jvector)
-and segments are persisted on any S3-compatible object store (MinIO for local
-development). It is **not** an S3 reimplementation and is **not** wire-compatible
-with any vendor's vector API — the object store is an implementation detail.
+A lightweight vector-database service. The public surface is "create a bucket,
+create an index, upsert vectors with attributes, query by similarity with
+filters, delete." The index is powered by
+[JVector](https://github.com/datastax/jvector) and segments are persisted on
+any S3-compatible object store (MinIO for local development). It is **not** an
+S3 reimplementation and is **not** wire-compatible with any vendor's vector
+API — the object store is an implementation detail.
+
+## Finding your way around
+
+| Looking for | Read |
+|---|---|
+| The authoritative design (stack, schema, URL shape, observability) | [`docs/design-notes.md`](docs/design-notes.md) |
+| What each module owns and depends on | each `vector-store-*/README.md` (linked below) |
+| Build / run / test mechanics | the [Build](#build), [Run locally](#run-locally), and [Test](#test) sections below |
+| How phases split up | the [Phase plan](#phase-plan) |
+
+If something in the code disagrees with `docs/design-notes.md`, fix the code —
+the design notes are authoritative.
 
 ## Phase plan
 
 | Phase | Goal | Status |
 |-------|------|--------|
-| 1 | Cold-archive proof of concept. One immutable segment per commit. Explicit commit. Infrequent-query latency target (100–500 ms). | In progress |
+| 1 | Cold-archive proof of concept. One immutable segment per commit. Explicit commit. Infrequent-query latency target 100–500 ms. | In progress |
 | 2 | Warm-query tier: real multi-level caching, LSM-shaped compaction, concurrent writers, richer filter grammar. | Planned — the architecture does not preclude it |
 
-Full design context lives in [`docs/design-notes.md`](docs/design-notes.md). If a
-later change disagrees with `design-notes.md`, fix the change — the design notes
-are authoritative.
+Phase 1 invariants (see `docs/design-notes.md` for the full list) must not
+regress: Index→Manifest→[Segment] always, user-id↔(segment,ordinal) mapping
+per segment, fan-out-and-merge on every query even at N=1, per-segment
+attribute sidecar, tombstone bits AND-ed into the accept mask.
+
+## Modules
+
+`vector-store-core` has no internal dependencies. `vector-store-api`,
+`-engine`, `-storage`, and `-metadata` each depend only on `core`.
+`vector-store-app` depends on all five and owns the Quarkus runtime wiring.
+
+| Module | Role | Status |
+|---|---|---|
+| [`vector-store-core`](vector-store-core/README.md) | Domain records, repository interfaces, JDBI implementations, Flyway migrations | Phase 1 populated |
+| [`vector-store-api`](vector-store-api/README.md) | REST resources, DTOs, API-key auth filter, exception mapper | Phase 1 populated |
+| [`vector-store-engine`](vector-store-engine/README.md) | JVector adapter: builder, on-disk writer, searcher | Lands in prompt 02 |
+| [`vector-store-storage`](vector-store-storage/README.md) | S3 client wiring, ranged-GET reader, block cache | Lands in prompt 03 |
+| [`vector-store-metadata`](vector-store-metadata/README.md) | Per-segment attribute sidecar + filter compiler | Lands in prompt 04 |
+| [`vector-store-app`](vector-store-app/README.md) | Quarkus bootstrap, CDI producers, startup seeding, main entrypoint | Phase 1 populated |
 
 ## Tech stack
 
@@ -27,33 +56,16 @@ are authoritative.
 | Build | Maven 3.9+, multi-module |
 | Index engine | JVector 4.0.0-rc.8 |
 | Object storage | MinIO for local/dev, any S3-compatible service for prod (AWS SDK v2) |
-| Catalog | SQLite + JDBI 3 + Flyway (Phase 1); Postgres-ready schema |
-| Observability | OpenTelemetry via OTLP gRPC; Micrometer metrics; JSON logging |
-| Testing | JUnit 5, AssertJ, Testcontainers, RestAssured |
-
-Password hashing uses **Argon2id** via
-[`com.password4j:password4j`](https://github.com/Password4j/password4j)
-(pure-Java, no JNI).
-
-## Modules
-
-```
-vector-store-parent/
-├── vector-store-api         REST resources, DTOs, API-key auth filter, exception mapper
-├── vector-store-core        Domain model + JDBI catalog repositories + Flyway migrations
-├── vector-store-engine      JVector adapter (populated in prompt 02)
-├── vector-store-storage     S3-backed reader and block cache (populated in prompt 03)
-├── vector-store-metadata    Attribute sidecar + filter compiler (populated in prompt 04)
-└── vector-store-app         Quarkus bootstrap, configuration, CDI wiring, main entrypoint
-```
-
-See each module's `README.md` for its contract.
+| Catalog | SQLite + JDBI 3 + Flyway (Phase 1); schema stays Postgres-portable |
+| Auth | API-key with Argon2id hashes via [`password4j`](https://github.com/Password4j/password4j) (pure Java, no JNI) |
+| Observability | OpenTelemetry OTLP gRPC; Micrometer meters exposed at `/q/metrics`; JSON logging in `%prod` |
+| Testing | JUnit 5, AssertJ, Mockito, RestAssured (+ Testcontainers in later prompts) |
 
 ## Requirements
 
-- JDK **21** on `PATH` (the project ships a `.java-version` pin for
-  [jenv](https://www.jenv.be/) users).
-- Maven **3.9+** (the `./mvnw` wrapper is included).
+- JDK **21** on `PATH`. The project ships a `.java-version` pin for
+  [jenv](https://www.jenv.be/) users; any other Java version manager is fine.
+- Maven **3.9+**. The `./mvnw` wrapper is committed.
 
 ## Build
 
@@ -61,9 +73,9 @@ See each module's `README.md` for its contract.
 ./mvnw verify
 ```
 
-Runs all unit and integration tests under Surefire and Failsafe. JVM flags for
-the Panama Vector API are configured in the parent POM so JVector exercises its
-SIMD code path during tests.
+Runs every module's Surefire (unit + `@QuarkusTest` component) tests and
+Failsafe (integration) tests. JVM flags for the Panama Vector API are set in
+the parent POM so JVector exercises its SIMD code path during tests.
 
 ## Run locally
 
@@ -71,61 +83,78 @@ SIMD code path during tests.
 ./mvnw -pl vector-store-app quarkus:dev
 ```
 
-Endpoints:
+Management endpoints:
 
-- `GET  /q/health` — liveness and readiness
-- `GET  /q/metrics` — Prometheus scrape
-- `GET  /q/openapi` — OpenAPI spec for the `/v1` surface
+- `GET /q/health` — liveness and readiness
+- `GET /q/metrics` — Prometheus scrape with the meters named in
+  `docs/design-notes.md`
+- `GET /q/openapi` — OpenAPI spec for the `/v1` surface
+
+All `/v1/*` routes require a valid `X-Api-Key` header; `/q/*` endpoints do
+not. The REST surface itself lives in `vector-store-api` — see that module's
+README for the request / response shapes and error envelope.
 
 ### Bootstrap admin key
 
 On first startup, if the environment variable `VECTORSTORE_BOOTSTRAP_ADMIN_KEY`
-is set and no admin key exists in the catalog, the application seeds a single
-admin API key from that value. Pass it via the `X-Api-Key` header on admin
-requests:
+is set and no admin key exists in the catalog, the application seeds one from
+its value. The variable must carry a full `keyId.secret` token — the same
+form clients send in the `X-Api-Key` header:
 
 ```
-export VECTORSTORE_BOOTSTRAP_ADMIN_KEY='admin-dev-key'
+export VECTORSTORE_BOOTSTRAP_ADMIN_KEY='admin-local.dev-secret'
 ./mvnw -pl vector-store-app quarkus:dev
 ```
 
 ```
-curl -H "X-Api-Key: admin-dev-key" \
+curl -H "X-Api-Key: admin-local.dev-secret" \
      -H "Content-Type: application/json" \
      -d '{"bucketId":"demo","displayName":"Demo"}' \
      http://localhost:8080/v1/buckets
 ```
 
+Bootstrap is idempotent — if an admin key already exists, the variable is
+ignored. The secret is hashed with Argon2id before storage.
+
 ## Test
 
 ```
-./mvnw test                 # unit tests only
-./mvnw verify               # unit + integration
-./mvnw -pl vector-store-core test   # per-module
+./mvnw verify                   # full test suite across all modules
+./mvnw -pl vector-store-core test   # one module only
 ```
 
-Tests do not connect to any external service in Phase 1's bootstrap prompt.
-MinIO-backed tests arrive in a later prompt via Testcontainers.
+Phase 1 tests do not connect to any external service. Testcontainers-backed
+MinIO tests land with `vector-store-storage` in prompt 03.
 
 ## Configuration
 
-Every launch must include the Panama Vector API JDK flags. The parent POM sets
-these for Surefire / Failsafe automatically. For container images and
+Every launch must include the Panama Vector JDK flags. The parent POM sets
+them for Surefire / Failsafe automatically. For container images and
 production, pass them via `JAVA_TOOL_OPTIONS`:
 
 ```
 JAVA_TOOL_OPTIONS="--add-modules=jdk.incubator.vector --enable-native-access=ALL-UNNAMED"
 ```
 
-Profile-specific configuration lives in
-`vector-store-app/src/main/resources/application.properties`:
+Runtime configuration lives in
+[`vector-store-app/src/main/resources/application.properties`](vector-store-app/src/main/resources/application.properties):
 
-- `%dev` — OTel exporter disabled, console logging.
-- `%test` — OTel exporter disabled, in-memory SQLite.
-- `%prod` — OTel exporter points to `http://otel-collector.stepflow-o11y:4317`, JSON logging.
+- `%dev` / `%test` — OTel SDK disabled, human-readable console logging.
+- any other profile — OTel SDK enabled; endpoint reads from the
+  OpenTelemetry-standard environment variable `OTEL_EXPORTER_OTLP_ENDPOINT`
+  (default `http://localhost:4317`). JSON logging is enabled by the app's
+  log config.
 
-Override the catalog file path with `VECTORSTORE_DB_PATH`
-(default: `./vector-store.db`).
+Key environment variables (see
+[`vector-store-app/README.md`](vector-store-app/README.md) for the full
+reference):
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `VECTORSTORE_DB_PATH` | SQLite catalog file | `./vector-store.db` |
+| `VECTORSTORE_BOOTSTRAP_ADMIN_KEY` | `keyId.secret` token to seed the first admin key | unset |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP collector endpoint | `http://localhost:4317` |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | OTLP protocol | `grpc` |
 
 ## License
 
