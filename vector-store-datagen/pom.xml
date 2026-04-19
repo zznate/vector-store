@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>io.github.zznate</groupId>
+    <artifactId>vector-store-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>vector-store-datagen</artifactId>
+  <name>vector-store-datagen</name>
+  <description>
+    Tooling for producing and managing data that the vector-store project
+    consumes — recall-test fixtures, demo corpora, and benchmark inputs.
+    Deliberately sits outside the service module graph: has no sibling
+    dependencies, is never invoked by CI, and runs only when explicitly
+    asked via ./mvnw -pl vector-store-datagen exec:java@&lt;id&gt;.
+  </description>
+
+  <properties>
+    <djl.version>0.36.0</djl.version>
+    <jsoup.version>1.19.1</jsoup.version>
+    <exec.plugin.version>3.5.0</exec.plugin.version>
+  </properties>
+
+  <dependencies>
+    <!--
+      Deep Java Library + PyTorch engine for the one-shot embedding pass.
+      PyTorch rather than ONNX because the canonical HuggingFace model URL
+      (djl://ai.djl.huggingface.pytorch/...) is a single-line loader, and
+      the ~400 MB native download is a one-off on each developer's
+      ~/.djl.ai cache — this module never runs in CI.
+    -->
+    <dependency>
+      <groupId>ai.djl</groupId>
+      <artifactId>api</artifactId>
+      <version>${djl.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>ai.djl.huggingface</groupId>
+      <artifactId>tokenizers</artifactId>
+      <version>${djl.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>ai.djl.pytorch</groupId>
+      <artifactId>pytorch-engine</artifactId>
+      <version>${djl.version}</version>
+    </dependency>
+
+    <!-- HTML parsing for Wikipedia extracts. -->
+    <dependency>
+      <groupId>org.jsoup</groupId>
+      <artifactId>jsoup</artifactId>
+      <version>${jsoup.version}</version>
+    </dependency>
+
+    <!-- JSON Lines I/O. -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+
+    <!-- Logging on stdout via slf4j-simple (datagen stands alone). -->
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-simple</artifactId>
+      <version>2.0.17</version>
+      <scope>runtime</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <!--
+        Subcommands bound explicitly to exec goals with unique IDs.
+        No <phase> binding, so nothing fires during the standard build
+        lifecycle. Invocation form:
+          ./mvnw -pl vector-store-datagen exec:java@generate-recall-fixture
+          ./mvnw -pl vector-store-datagen exec:java@validate-fixture
+      -->
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <version>${exec.plugin.version}</version>
+        <executions>
+          <execution>
+            <id>generate-recall-fixture</id>
+            <goals>
+              <goal>java</goal>
+            </goals>
+            <configuration>
+              <mainClass>io.github.zznate.vectorstore.datagen.Cli</mainClass>
+              <arguments>
+                <argument>generate-recall-fixture</argument>
+                <argument>--output</argument>
+                <argument>${project.basedir}/../vector-store-engine/src/test/resources/recall</argument>
+              </arguments>
+            </configuration>
+          </execution>
+          <execution>
+            <id>validate-fixture</id>
+            <goals>
+              <goal>java</goal>
+            </goals>
+            <configuration>
+              <mainClass>io.github.zznate.vectorstore.datagen.Cli</mainClass>
+              <arguments>
+                <argument>validate-fixture</argument>
+                <argument>--input</argument>
+                <argument>${project.basedir}/../vector-store-engine/src/test/resources/recall</argument>
+              </arguments>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

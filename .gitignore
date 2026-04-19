@@ -48,3 +48,12 @@ Thumbs.db
 # JVector / vector-store local artifacts
 /data/
 /tmp-segments/
+/segments/
+
+# ML models and caches (datagen module)
+.djl.ai/
+.huggingface/
+*.onnx
+*.safetensors
+*.pt
+*.bin

@@ -37,6 +37,7 @@
     <module>vector-store-storage</module>
     <module>vector-store-metadata</module>
     <module>vector-store-app</module>
+    <module>vector-store-datagen</module>
   </modules>
 
   <properties>

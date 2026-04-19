@@ -86,7 +86,8 @@ public class SegmentSearcher implements Searcher {
         RandomAccessReader reader = segmentStore.openGraph(segment);
         OnDiskGraphIndex onDiskGraph = OnDiskGraphIndex.load(() -> reader);
         OnDiskGraphIndex.View view = onDiskGraph.getView()) {
-      SearchResult result = GraphSearcher.search(query, topK, view, similarity, onDiskGraph, accept);
+      SearchResult result =
+          GraphSearcher.search(query, topK, view, similarity, onDiskGraph, accept);
 
       DistributionSummary.builder("vectorstore.query.nodes_visited")
           .description("Graph nodes visited during a query")
