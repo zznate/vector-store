@@ -20,7 +20,8 @@ public sealed class VectorStoreException extends RuntimeException
         IndexAlreadyExistsException,
         IndexNotFoundException,
         NotImplementedException,
-        UnauthorizedException {
+        UnauthorizedException,
+        UnsupportedFilterOperatorHttpException {
 
   private final Status status;
   private final String errorCode;

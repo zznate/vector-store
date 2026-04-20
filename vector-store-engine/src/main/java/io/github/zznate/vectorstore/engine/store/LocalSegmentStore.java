@@ -62,6 +62,15 @@ public class LocalSegmentStore implements SegmentStore, AutoCloseable {
     return Files.newInputStream(path);
   }
 
+  @Override
+  public void putSidecar(Segment segment, String fileName, byte[] content) throws IOException {
+    Path dir = root.resolve(segment.objectPrefix());
+    Files.createDirectories(dir);
+    Path tmp = dir.resolve(fileName + ".tmp");
+    Files.write(tmp, content);
+    Files.move(tmp, dir.resolve(fileName), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+  }
+
   /**
    * Release every cached graph mapping. Called by the app module on CDI
    * disposal so the process exits cleanly.

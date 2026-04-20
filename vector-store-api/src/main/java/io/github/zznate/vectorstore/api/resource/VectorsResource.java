@@ -11,6 +11,7 @@ import io.github.zznate.vectorstore.api.dto.VectorInput;
 import io.github.zznate.vectorstore.api.dto.VectorLookupResponse;
 import io.github.zznate.vectorstore.api.error.DimensionMismatchException;
 import io.github.zznate.vectorstore.api.error.IndexNotFoundException;
+import io.github.zznate.vectorstore.api.error.UnsupportedFilterOperatorHttpException;
 import io.github.zznate.vectorstore.core.catalog.manifest.ManifestResolver;
 import io.github.zznate.vectorstore.core.catalog.model.Segment;
 import io.github.zznate.vectorstore.core.catalog.model.VectorIndex;
@@ -18,9 +19,14 @@ import io.github.zznate.vectorstore.core.catalog.repository.VectorIndexRepositor
 import io.github.zznate.vectorstore.engine.buffer.BufferEntry;
 import io.github.zznate.vectorstore.engine.buffer.WriteBuffer;
 import io.github.zznate.vectorstore.engine.search.QueryCoordinator;
-import io.github.zznate.vectorstore.engine.search.ScoredOrdinal;
+import io.github.zznate.vectorstore.engine.search.ScoredHit;
 import io.github.zznate.vectorstore.engine.search.Searcher;
 import io.github.zznate.vectorstore.engine.tombstone.InMemoryTombstones;
+import io.github.zznate.vectorstore.metadata.filter.FilterExpr;
+import io.github.zznate.vectorstore.metadata.filter.FilterParser;
+import io.github.zznate.vectorstore.metadata.filter.UnsupportedFilterOperatorException;
+import io.github.zznate.vectorstore.metadata.sidecar.AttributeSidecar;
+import io.github.zznate.vectorstore.metadata.sidecar.SidecarLoader;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.validation.Valid;
@@ -51,6 +57,7 @@ public class VectorsResource {
   private final Searcher searcher;
   private final InMemoryTombstones tombstones;
   private final ManifestResolver manifestResolver;
+  private final SidecarLoader sidecarLoader;
 
   @Inject
   public VectorsResource(
@@ -59,13 +66,15 @@ public class VectorsResource {
       QueryCoordinator queryCoordinator,
       Searcher searcher,
       InMemoryTombstones tombstones,
-      ManifestResolver manifestResolver) {
+      ManifestResolver manifestResolver,
+      SidecarLoader sidecarLoader) {
     this.indexes = indexes;
     this.writeBuffer = writeBuffer;
     this.queryCoordinator = queryCoordinator;
     this.searcher = searcher;
     this.tombstones = tombstones;
     this.manifestResolver = manifestResolver;
+    this.sidecarLoader = sidecarLoader;
   }
 
   @POST
@@ -103,11 +112,18 @@ public class VectorsResource {
       throw new DimensionMismatchException(
           index.indexId(), index.dimension(), request.vector().length);
     }
-    List<ScoredOrdinal> hits =
-        queryCoordinator.query(index.indexId(), request.vector(), request.topK());
+    FilterExpr filter;
+    try {
+      filter = FilterParser.parse(request.filter());
+    } catch (UnsupportedFilterOperatorException e) {
+      throw new UnsupportedFilterOperatorHttpException(e.key(), e.operator());
+    }
+
+    List<ScoredHit> hits =
+        queryCoordinator.query(index.indexId(), request.vector(), request.topK(), filter);
     List<QueryHit> mapped = new ArrayList<>(hits.size());
-    for (ScoredOrdinal hit : hits) {
-      mapped.add(new QueryHit(hit.userId(), hit.score(), Map.of()));
+    for (ScoredHit hit : hits) {
+      mapped.add(new QueryHit(hit.userId(), hit.score(), hit.attributes()));
     }
     return new QueryResponse(mapped);
   }
@@ -133,14 +149,24 @@ public class VectorsResource {
       @PathParam("id") String id) {
     VectorIndex index = requireIndex(bucketId, indexId);
     if (tombstones.isTombstoned(index.indexId(), id)) {
-      return new VectorLookupResponse(id, false);
+      return new VectorLookupResponse(id, false, Map.of());
     }
     for (Segment segment : manifestResolver.activeSegments(index.indexId())) {
-      if (searcher.contains(segment, id)) {
-        return new VectorLookupResponse(id, true);
+      int ordinal = searcher.findOrdinal(segment, id);
+      if (ordinal < 0) {
+        continue;
       }
+      // Skip segments where this ordinal has been persistently tombstoned;
+      // GET /vectors/{id} must respect committed deletes.
+      if (sidecarLoader.tombstones(segment).bitmap().contains(ordinal)) {
+        return new VectorLookupResponse(id, false, Map.of());
+      }
+      AttributeSidecar attributes = sidecarLoader.attributes(segment);
+      Map<String, String> attrs =
+          ordinal < attributes.size() ? attributes.attributesOf(ordinal) : Map.of();
+      return new VectorLookupResponse(id, true, attrs);
     }
-    return new VectorLookupResponse(id, false);
+    return new VectorLookupResponse(id, false, Map.of());
   }
 
   @GET

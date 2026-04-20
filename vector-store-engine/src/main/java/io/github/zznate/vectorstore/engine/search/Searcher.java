@@ -4,6 +4,7 @@ import io.github.jbellis.jvector.util.Bits;
 import io.github.zznate.vectorstore.core.catalog.model.Segment;
 import java.util.List;
 import java.util.Set;
+import org.roaringbitmap.RoaringBitmap;
 
 /**
  * Performs a single-segment kNN search. Higher-level query coordination
@@ -20,15 +21,25 @@ public interface Searcher {
   List<ScoredOrdinal> search(Segment segment, float[] queryVector, int topK, Bits accept);
 
   /**
-   * Build a {@link Bits} accept mask for {@code segment} that admits every
-   * ordinal except those whose user ID appears in {@code deniedUserIds}.
-   * Uses the per-segment ordinal map (cached internally) to translate.
+   * Ordinal of {@code userId} within {@code segment}, or {@code -1} if
+   * the user ID is not present. Drives both {@link #contains} and the
+   * {@code GET /vectors/{id}} response path, which needs the ordinal to
+   * read attributes from the sidecar.
    */
-  Bits buildAcceptMask(Segment segment, Set<String> deniedUserIds);
+  int findOrdinal(Segment segment, String userId);
 
   /**
    * True if {@code userId} is present in {@code segment}'s ordinal map.
-   * Drives {@code GET /vectors/{id}} on the query path.
    */
-  boolean contains(Segment segment, String userId);
+  default boolean contains(Segment segment, String userId) {
+    return findOrdinal(segment, userId) >= 0;
+  }
+
+  /**
+   * Resolve each of {@code userIds} against {@code segment}'s ordinal map
+   * and return a {@link RoaringBitmap} of the ordinals that match. IDs
+   * not present in the segment are skipped; the returned bitmap is empty
+   * when none match. Drives the commit-time tombstone merge.
+   */
+  RoaringBitmap ordinalsOf(Segment segment, Set<String> userIds);
 }

@@ -126,6 +126,14 @@ public class S3SegmentStore implements SegmentStore, AutoCloseable {
     return s3Client.getObject(GetObjectRequest.builder().bucket(bucket).key(key).build());
   }
 
+  @Override
+  public void putSidecar(Segment segment, String fileName, byte[] content) {
+    String key = stripTrailingSlash(segment.objectPrefix()) + "/" + fileName;
+    s3Client.putObject(
+        PutObjectRequest.builder().bucket(bucket).key(key).build(),
+        RequestBody.fromBytes(content));
+  }
+
   /**
    * Drop every cached supplier. Safe to call repeatedly; used by the CDI
    * container on application shutdown.

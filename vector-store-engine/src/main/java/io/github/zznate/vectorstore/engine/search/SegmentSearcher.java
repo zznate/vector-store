@@ -6,7 +6,6 @@ import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.graph.SearchResult;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex;
 import io.github.jbellis.jvector.util.Bits;
-import io.github.jbellis.jvector.util.FixedBitSet;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
@@ -118,29 +117,29 @@ public class SegmentSearcher implements Searcher {
   }
 
   @Override
-  public boolean contains(Segment segment, String userId) {
+  public int findOrdinal(Segment segment, String userId) {
     String[] ordinalMap = ordinalMap(segment);
-    for (String candidate : ordinalMap) {
-      if (userId.equals(candidate)) {
-        return true;
+    for (int i = 0; i < ordinalMap.length; i++) {
+      if (userId.equals(ordinalMap[i])) {
+        return i;
       }
     }
-    return false;
+    return -1;
   }
 
   @Override
-  public Bits buildAcceptMask(Segment segment, Set<String> deniedUserIds) {
-    if (deniedUserIds == null || deniedUserIds.isEmpty()) {
-      return Bits.ALL;
+  public org.roaringbitmap.RoaringBitmap ordinalsOf(Segment segment, Set<String> userIds) {
+    org.roaringbitmap.RoaringBitmap bitmap = new org.roaringbitmap.RoaringBitmap();
+    if (userIds == null || userIds.isEmpty()) {
+      return bitmap;
     }
     String[] ordinalMap = ordinalMap(segment);
-    FixedBitSet bits = new FixedBitSet(ordinalMap.length);
     for (int ordinal = 0; ordinal < ordinalMap.length; ordinal++) {
-      if (!deniedUserIds.contains(ordinalMap[ordinal])) {
-        bits.set(ordinal);
+      if (userIds.contains(ordinalMap[ordinal])) {
+        bitmap.add(ordinal);
       }
     }
-    return bits;
+    return bitmap;
   }
 
   private String[] ordinalMap(Segment segment) {

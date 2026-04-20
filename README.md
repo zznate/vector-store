@@ -44,7 +44,7 @@ attribute sidecar, tombstone bits AND-ed into the accept mask.
 | [`vector-store-api`](vector-store-api/README.md) | REST resources, DTOs, API-key auth filter, exception mapper | Phase 1 populated |
 | [`vector-store-engine`](vector-store-engine/README.md) | JVector adapter: write buffer, segment builder, local-disk `SegmentStore`, searcher, commit + query coordinators | Phase 2 populated |
 | [`vector-store-storage`](vector-store-storage/README.md) | S3 client wiring, ranged-GET reader, block cache | Phase 3 populated |
-| [`vector-store-metadata`](vector-store-metadata/README.md) | Per-segment attribute sidecar + filter compiler | Lands in phase 4 |
+| [`vector-store-metadata`](vector-store-metadata/README.md) | Per-segment attribute sidecar, persisted tombstones, equality-filter compiler | Phase 4 populated |
 | [`vector-store-app`](vector-store-app/README.md) | Quarkus bootstrap, CDI producers, startup seeding, main entrypoint | Phase 1 populated |
 | [`vector-store-datagen`](vector-store-datagen/README.md) | Offline tooling: recall-fixture generation, demo-data seeding | Outside the service module graph; never run by CI |
 

@@ -81,4 +81,14 @@ class VectorStoreExceptionMapperTest {
     assertThat(ex.status()).isEqualTo(Status.FORBIDDEN);
     assertThat(ex.errorCode()).isEqualTo("forbidden");
   }
+
+  @Test
+  void unsupportedFilterOperatorCarries400AndNamesKey() {
+    UnsupportedFilterOperatorHttpException ex =
+        new UnsupportedFilterOperatorHttpException("category", "$in");
+
+    assertThat(ex.status()).isEqualTo(Status.BAD_REQUEST);
+    assertThat(ex.errorCode()).isEqualTo("unsupported_operator");
+    assertThat(ex.getMessage()).contains("category").contains("$in");
+  }
 }

@@ -47,12 +47,21 @@ vector-store-parent/                  # Maven parent POM
 
 Dependency rules:
 
-- `engine`, `storage`, `metadata` depend on `core`.
-- `api` depends on `core` and on `engine`. The REST resources need to
-  invoke the engine's coordinator surface (write buffer, commit pipeline,
-  query fan-out, tombstone set), and threading interfaces through `core`
-  for every call costs more than the direct dependency saves. Storage and
-  metadata stay below this line: `api` does not pull them in.
+- `storage` and `metadata` depend only on `core`.
+- `engine` depends on `core` and on `metadata`. At commit time the
+  `SegmentBuilder` serialises `attributes.jsonl` and the
+  `CommitCoordinator` merges staged deletes into each segment's
+  `tombstones.roar`; at query time the `QueryCoordinator` invokes the
+  `FilterCompiler` and the `SidecarLoader`. The sidecar + filter types
+  are metadata concerns; routing them through `core` would force every
+  phase-2 grammar extension to ripple through an interface layer that
+  exists only to appease the isolation rule.
+- `api` depends on `core` and on `engine` (transitively, on `metadata`).
+  The REST resources invoke the engine's coordinator surface (write
+  buffer, commit pipeline, query fan-out, tombstone set) and translate
+  `UnsupportedFilterOperatorException` from the metadata parser into
+  the `400 unsupported_operator` response. `api` does not depend on
+  `storage` directly.
 - `app` depends on all other modules and owns runtime configuration.
 - No other sibling-to-sibling module dependencies. No circular deps.
 - Shared types live in `core`. Do not create a `commons` dumping ground.
@@ -212,7 +221,8 @@ Single OTLP gRPC exporter. Resource attributes:
 | `vectorstore.storage.get.bytes` | Counter | direction | Bytes transferred against the object store (`direction=download`) |
 | `vectorstore.cache.block.hit` | Counter | | Block cache hits |
 | `vectorstore.cache.block.miss` | Counter | | Block cache misses |
-| `vectorstore.filter.compile.duration` | Histogram | | Filter compilation cost (phase 4+) |
+| `vectorstore.filter.compile.duration` | Histogram | index_id, term_count, result_ratio_bucket | Filter compilation cost; `result_ratio_bucket` is one of `0-25`, `25-50`, `50-75`, `75-100` |
+| `vectorstore.query.filtered_ratio` | DistributionSummary | index_id | Fraction of ordinals accepted per segment (scaled to 0–100) |
 
 Tags to **never** include: user-supplied IDs, API keys, raw vector values, raw attribute values. `index_id` is an internal UUID, not user content.
 
@@ -225,7 +235,7 @@ Quarkus auto-instruments HTTP, JDBI, and the Micrometer pipeline. Manual spans (
 - `vectorstore.query.fanout` — parent span for per-segment fan-out
 - `vectorstore.query.segment.search` — per-segment search, one child per active segment
 - `vectorstore.storage.range_get` — ranged object GET, one per block-cache miss
-- `vectorstore.filter.compile` — filter predicate → Bits mask (phase 4+)
+- `vectorstore.filter.compile` — filter predicate → Bits mask; attributes: `segment_id`, `index_id`, `term_count`, `vector_count`, `accepted_count`
 
 Span attributes: `index_id`, `segment_id`, `top_k`, `vector_count`, `cache_hit`. Never raw vectors or user attributes.
 

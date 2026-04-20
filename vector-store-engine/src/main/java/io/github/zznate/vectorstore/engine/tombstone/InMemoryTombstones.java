@@ -6,16 +6,14 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Per-index in-memory set of tombstoned user IDs. The query path consults
- * this set when building the per-segment accept mask so a tombstoned ID
- * never appears in results.
+ * Per-index in-memory staging set of tombstoned user IDs. Delete requests
+ * land here; {@link CommitCoordinator} drains the set into per-segment
+ * {@code tombstones.roar} sidecars on the next commit. Queries read this
+ * set alongside the persisted bitmaps so a delete is visible immediately,
+ * before the next commit.
  *
- * <p>TODO(phase-4: persist): phase 4 writes tombstone bits into each
- * segment's {@code tombstones.roar} sidecar and folds them into the
- * accept mask at segment-open time. Until then, deletes are lost on
- * process restart. Any consumer of this class should assume restart
- * tolerance is zero and should be adjusted along with the phase-4
- * migration that makes tombstones durable.
+ * <p>Uncommitted staged deletes are lost on process restart. A WAL or
+ * catalog-backed staging durability story is a phase-2 concern.
  */
 @ApplicationScoped
 public class InMemoryTombstones {
@@ -36,5 +34,30 @@ public class InMemoryTombstones {
   public boolean isTombstoned(String indexId, String userId) {
     Set<String> set = byIndex.get(indexId);
     return set != null && set.contains(userId);
+  }
+
+  /**
+   * Snapshot the staged set for {@code indexId} without mutating it. The
+   * commit coordinator persists the snapshot, then calls {@link
+   * #removeAll} with the same snapshot once persistence succeeds. If
+   * commit fails, the staged set is untouched and the next commit retries
+   * the same IDs.
+   */
+  public Set<String> snapshot(String indexId) {
+    Set<String> staged = byIndex.get(indexId);
+    return staged == null ? Set.of() : Set.copyOf(staged);
+  }
+
+  /**
+   * Remove the given user IDs from the staged set for {@code indexId}.
+   * IDs added to staging during the surrounding commit stay for the next
+   * commit.
+   */
+  public void removeAll(String indexId, Set<String> userIds) {
+    Set<String> staged = byIndex.get(indexId);
+    if (staged == null || userIds.isEmpty()) {
+      return;
+    }
+    staged.removeAll(userIds);
   }
 }

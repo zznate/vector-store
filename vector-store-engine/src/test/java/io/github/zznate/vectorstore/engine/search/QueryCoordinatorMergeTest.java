@@ -11,18 +11,26 @@ import io.github.zznate.vectorstore.core.catalog.manifest.ManifestResolver;
 import io.github.zznate.vectorstore.core.catalog.model.Segment;
 import io.github.zznate.vectorstore.core.catalog.model.SegmentState;
 import io.github.zznate.vectorstore.engine.tombstone.InMemoryTombstones;
+import io.github.zznate.vectorstore.metadata.filter.FilterCompiler;
+import io.github.zznate.vectorstore.metadata.sidecar.AttributeSidecar;
+import io.github.zznate.vectorstore.metadata.sidecar.SidecarLoader;
+import io.github.zznate.vectorstore.metadata.sidecar.TombstoneSidecar;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.opentelemetry.api.OpenTelemetry;
+import io.opentelemetry.api.trace.Tracer;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /**
  * Verifies that {@link QueryCoordinator} merges per-segment hit lists into
  * a single top-k ordered by score, independent of segment count or
- * segment ordering. Uses a mocked {@link Searcher} so the merge algorithm
- * is exercised in isolation — the full build + search + merge path is
- * covered by {@code SegmentBuilderRecallTest}.
+ * segment ordering. Uses a mocked {@link Searcher} and a stub
+ * {@link SidecarLoader} so the merge algorithm is exercised in isolation;
+ * the full build + search + filter path is covered by
+ * {@code SegmentBuilderRecallTest} and by the MinIO integration tests.
  */
 class QueryCoordinatorMergeTest {
 
@@ -40,7 +48,6 @@ class QueryCoordinatorMergeTest {
     when(resolver.activeSegments(INDEX_ID)).thenReturn(List.of(segA, segB));
 
     Searcher searcher = mock(Searcher.class);
-    when(searcher.buildAcceptMask(any(Segment.class), any())).thenReturn(io.github.jbellis.jvector.util.Bits.ALL);
     when(searcher.search(eq(segA), eq(QUERY), anyInt(), any()))
         .thenReturn(
             List.of(
@@ -54,18 +61,12 @@ class QueryCoordinatorMergeTest {
                 new ScoredOrdinal(1, "e", 0.4f),
                 new ScoredOrdinal(2, "f", 0.2f)));
 
-    QueryCoordinator coordinator =
-        new QueryCoordinator(
-            resolver,
-            searcher,
-            new InMemoryTombstones(),
-            OpenTelemetry.noop().getTracer("test"),
-            new SimpleMeterRegistry());
+    QueryCoordinator coordinator = newCoordinator(searcher, resolver);
 
-    List<ScoredOrdinal> merged = coordinator.query(INDEX_ID, QUERY, 3);
+    List<ScoredHit> merged = coordinator.query(INDEX_ID, QUERY, 3, null);
 
-    assertThat(merged).extracting(ScoredOrdinal::userId).containsExactly("a", "d", "b");
-    assertThat(merged).extracting(ScoredOrdinal::score).containsExactly(0.9f, 0.8f, 0.5f);
+    assertThat(merged).extracting(ScoredHit::userId).containsExactly("a", "d", "b");
+    assertThat(merged).extracting(ScoredHit::score).containsExactly(0.9f, 0.8f, 0.5f);
   }
 
   @Test
@@ -74,7 +75,6 @@ class QueryCoordinatorMergeTest {
     when(resolver.activeSegments(INDEX_ID)).thenReturn(List.of(segA));
 
     Searcher searcher = mock(Searcher.class);
-    when(searcher.buildAcceptMask(any(Segment.class), any())).thenReturn(io.github.jbellis.jvector.util.Bits.ALL);
     when(searcher.search(eq(segA), eq(QUERY), anyInt(), any()))
         .thenReturn(
             List.of(
@@ -82,16 +82,10 @@ class QueryCoordinatorMergeTest {
                 new ScoredOrdinal(1, "b", 0.5f),
                 new ScoredOrdinal(2, "c", 0.3f)));
 
-    QueryCoordinator coordinator =
-        new QueryCoordinator(
-            resolver,
-            searcher,
-            new InMemoryTombstones(),
-            OpenTelemetry.noop().getTracer("test"),
-            new SimpleMeterRegistry());
+    QueryCoordinator coordinator = newCoordinator(searcher, resolver);
 
-    assertThat(coordinator.query(INDEX_ID, QUERY, 2))
-        .extracting(ScoredOrdinal::userId)
+    assertThat(coordinator.query(INDEX_ID, QUERY, 2, null))
+        .extracting(ScoredHit::userId)
         .containsExactly("a", "b");
   }
 
@@ -100,14 +94,31 @@ class QueryCoordinatorMergeTest {
     ManifestResolver resolver = mock(ManifestResolver.class);
     when(resolver.activeSegments(INDEX_ID)).thenReturn(List.of());
 
-    QueryCoordinator coordinator =
-        new QueryCoordinator(
-            resolver,
-            mock(Searcher.class),
-            new InMemoryTombstones(),
-            OpenTelemetry.noop().getTracer("test"),
-            new SimpleMeterRegistry());
+    QueryCoordinator coordinator = newCoordinator(mock(Searcher.class), resolver);
 
-    assertThat(coordinator.query(INDEX_ID, QUERY, 5)).isEmpty();
+    assertThat(coordinator.query(INDEX_ID, QUERY, 5, null)).isEmpty();
+  }
+
+  private QueryCoordinator newCoordinator(Searcher searcher, ManifestResolver resolver) {
+    SidecarLoader loader = mock(SidecarLoader.class);
+    // All segments report empty tombstones and empty attributes so the
+    // coordinator short-circuits to Bits.ALL and enriches hits with an
+    // empty attributes map.
+    when(loader.tombstones(any(Segment.class))).thenReturn(TombstoneSidecar.empty());
+    when(loader.attributes(any(Segment.class)))
+        .thenReturn(AttributeSidecar.of(List.of(Map.of(), Map.of(), Map.of())));
+
+    MeterRegistry registry = new SimpleMeterRegistry();
+    Tracer tracer = OpenTelemetry.noop().getTracer("test");
+    FilterCompiler compiler = new FilterCompiler(registry, tracer);
+
+    return new QueryCoordinator(
+        resolver,
+        searcher,
+        new InMemoryTombstones(),
+        loader,
+        compiler,
+        tracer,
+        registry);
   }
 }

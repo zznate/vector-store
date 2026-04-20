@@ -16,6 +16,8 @@ import io.github.zznate.vectorstore.core.catalog.model.IndexBuildParams;
 import io.github.zznate.vectorstore.core.segment.BuiltSegment;
 import io.github.zznate.vectorstore.engine.buffer.BufferEntry;
 import io.github.zznate.vectorstore.engine.buffer.BufferSnapshot;
+import io.github.zznate.vectorstore.metadata.sidecar.AttributeSidecarWriter;
+import io.github.zznate.vectorstore.metadata.sidecar.TombstoneSidecar;
 import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -48,8 +50,13 @@ import java.util.concurrent.TimeUnit;
  *       per line, same order as the JVector ordinals.
  *   <li>{@code header.json} — segment-level metadata (see
  *       {@link SegmentHeader}).
- *   <li>{@code attributes.jsonl} — empty placeholder; populated in phase 4.
- *   <li>{@code tombstones.roar} — empty placeholder; populated in phase 4.
+ *   <li>{@code attributes.jsonl} — one
+ *       {@code {"ordinal":N,"attributes":{...}}} per line, populated from
+ *       the {@link BufferEntry#attributes()} supplied at ingest.
+ *   <li>{@code tombstones.roar} — serialised empty {@link
+ *       org.roaringbitmap.RoaringBitmap}; the commit coordinator merges
+ *       staged deletes into this sidecar (and every prior active
+ *       segment's sidecar) after publish.
  * </ul>
  *
  * <p>Wrapped in OTel spans {@code vectorstore.commit.build} (graph
@@ -181,11 +188,15 @@ public class SegmentBuilder {
               metric,
               params,
               clock.instant()));
-      // Empty placeholders — phase 4 populates them with the actual
-      // attribute sidecar + RoaringBitmap tombstone bits. Keeping the
-      // files here locks the on-disk layout.
-      Files.createFile(tempDir.resolve("attributes.jsonl"));
-      Files.createFile(tempDir.resolve("tombstones.roar"));
+      List<java.util.Map<String, String>> byOrdinal = new ArrayList<>(snapshot.size());
+      for (BufferEntry entry : snapshot.entries()) {
+        byOrdinal.add(entry.attributes() == null ? java.util.Map.of() : entry.attributes());
+      }
+      AttributeSidecarWriter.write(tempDir.resolve("attributes.jsonl"), byOrdinal);
+      // Empty tombstone bitmap at segment-build time; CommitCoordinator's
+      // tombstone pass overwrites this sidecar when staged deletes need to
+      // be persisted against this (or any earlier active) segment.
+      Files.write(tempDir.resolve("tombstones.roar"), TombstoneSidecar.empty().toBytes());
     } finally {
       serializeSpan.end();
       Timer.builder("vectorstore.commit.duration")

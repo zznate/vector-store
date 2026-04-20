@@ -23,10 +23,28 @@
       <artifactId>vector-store-core</artifactId>
     </dependency>
 
+    <!--
+      vector-store-metadata is the second documented cross-sibling
+      dependency (alongside api -> engine). Engine owns the commit
+      pipeline; the per-segment sidecar writers (attributes + tombstones)
+      live in metadata. See docs/design-notes.md "Module layout" for the
+      rationale.
+    -->
+    <dependency>
+      <groupId>io.github.zznate</groupId>
+      <artifactId>vector-store-metadata</artifactId>
+    </dependency>
+
     <!-- JVector comes transitively via core; declare explicitly for clarity. -->
     <dependency>
       <groupId>io.github.jbellis</groupId>
       <artifactId>jvector</artifactId>
+    </dependency>
+
+    <!-- RoaringBitmap used for tombstone persistence. -->
+    <dependency>
+      <groupId>org.roaringbitmap</groupId>
+      <artifactId>RoaringBitmap</artifactId>
     </dependency>
 
     <!-- CDI + Jackson for engine beans and sidecar serialization. -->

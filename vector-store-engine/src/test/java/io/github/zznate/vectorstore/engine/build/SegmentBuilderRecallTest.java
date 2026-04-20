@@ -103,8 +103,11 @@ class SegmentBuilderRecallTest {
     assertThat(segDir.resolve("header.json")).exists();
     assertThat(segDir.resolve("attributes.jsonl")).exists();
     assertThat(segDir.resolve("tombstones.roar")).exists();
-    assertThat(Files.size(segDir.resolve("attributes.jsonl"))).isZero();
-    assertThat(Files.size(segDir.resolve("tombstones.roar"))).isZero();
+    // attributes.jsonl has one JSON line per ordinal even when the map is
+    // empty; tombstones.roar carries the portable RoaringBitmap header of
+    // an empty bitmap. Both are non-zero; both are small.
+    assertThat(Files.size(segDir.resolve("attributes.jsonl"))).isPositive();
+    assertThat(Files.size(segDir.resolve("tombstones.roar"))).isPositive();
 
     int top1Correct = 0;
     int top5MajorityCorrect = 0;
