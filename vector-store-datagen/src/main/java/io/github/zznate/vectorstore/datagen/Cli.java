@@ -2,6 +2,7 @@ package io.github.zznate.vectorstore.datagen;
 
 import io.github.zznate.vectorstore.datagen.fixture.GenerateRecallFixtureCommand;
 import io.github.zznate.vectorstore.datagen.fixture.ValidateFixtureCommand;
+import io.github.zznate.vectorstore.datagen.ingest.IngestFixtureCommand;
 import java.util.Arrays;
 
 /**
@@ -24,6 +25,7 @@ public final class Cli {
     switch (command) {
       case "generate-recall-fixture" -> GenerateRecallFixtureCommand.run(rest);
       case "validate-fixture" -> ValidateFixtureCommand.run(rest);
+      case "ingest-fixture" -> IngestFixtureCommand.run(rest);
       case "help", "--help", "-h" -> usage();
       default -> {
         System.err.println("unknown subcommand: " + command);
@@ -48,6 +50,17 @@ public final class Cli {
                   Sanity-check a previously-written fixture: every entry
                   parses, embedding dimensions agree, query
                   expectedArticleSlug values all exist in the corpus.
+
+          <cmd> ingest-fixture --input <dir> [--endpoint URL]
+                                [--api-key TOKEN] [--bucket B]
+                                [--index I] [--batch-size N]
+                  Push a generated fixture into a running vector-store
+                  service. Creates bucket + index on first run (409 =
+                  reuse), batch-puts every chunk, commits. Defaults:
+                  endpoint=http://localhost:8080, bucket=demo,
+                  index=wikipedia, batch-size=256. The API key falls back
+                  to VECTORSTORE_BOOTSTRAP_ADMIN_KEY when --api-key is
+                  omitted.
 
           <cmd> help
                   Print this message.

@@ -24,6 +24,17 @@
     <djl.version>0.36.0</djl.version>
     <jsoup.version>1.19.1</jsoup.version>
     <exec.plugin.version>3.5.0</exec.plugin.version>
+
+    <!--
+      ingest-fixture defaults. Override on the command line via
+      `mvn -Dvectorstore.datagen.endpoint=http://...` etc. The API key is
+      resolved inside the command (flag, then env var), not from these
+      properties.
+    -->
+    <vectorstore.datagen.endpoint>http://localhost:8080</vectorstore.datagen.endpoint>
+    <vectorstore.datagen.bucket>demo</vectorstore.datagen.bucket>
+    <vectorstore.datagen.index>wikipedia</vectorstore.datagen.index>
+    <vectorstore.datagen.batch-size>256</vectorstore.datagen.batch-size>
   </properties>
 
   <dependencies>
@@ -111,6 +122,35 @@
                 <argument>validate-fixture</argument>
                 <argument>--input</argument>
                 <argument>${project.basedir}/../vector-store-engine/src/test/resources/recall</argument>
+              </arguments>
+            </configuration>
+          </execution>
+          <!--
+            ingest-fixture pushes the Wikipedia recall corpus into a
+            running vector-store service (`./mvnw -pl vector-store-app
+            quarkus:dev` on :8080 with docker-compose MinIO). Defaults
+            target a stock local dev setup. Overrides propagate via
+            -Dvectorstore.datagen.* properties.
+          -->
+          <execution>
+            <id>ingest-fixture</id>
+            <goals>
+              <goal>java</goal>
+            </goals>
+            <configuration>
+              <mainClass>io.github.zznate.vectorstore.datagen.Cli</mainClass>
+              <arguments>
+                <argument>ingest-fixture</argument>
+                <argument>--input</argument>
+                <argument>${project.basedir}/../vector-store-engine/src/test/resources/recall</argument>
+                <argument>--endpoint</argument>
+                <argument>${vectorstore.datagen.endpoint}</argument>
+                <argument>--bucket</argument>
+                <argument>${vectorstore.datagen.bucket}</argument>
+                <argument>--index</argument>
+                <argument>${vectorstore.datagen.index}</argument>
+                <argument>--batch-size</argument>
+                <argument>${vectorstore.datagen.batch-size}</argument>
               </arguments>
             </configuration>
           </execution>
