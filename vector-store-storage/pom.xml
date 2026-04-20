@@ -14,7 +14,7 @@
   <name>vector-store-storage</name>
   <description>
     Object-store client, S3-backed reader supplier, block cache.
-    Populated in prompt 03.
+    Populated in phase 3.
   </description>
 
   <dependencies>

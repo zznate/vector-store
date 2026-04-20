@@ -29,7 +29,7 @@ These five invariants make Phase 2 additive rather than a breaking rewrite. Pres
 | Data access | JDBI 3 via the Quarkiverse `quarkus-jdbi` extension + Agroal datasource | |
 | Schema migrations | Flyway via `quarkus-flyway` | |
 | Observability | OpenTelemetry via `quarkus-opentelemetry` | OTLP gRPC exporter. Dev profile disables exporter and logs to console; prod profile exports to the cluster OTel Collector. |
-| Testing | JUnit 5 + AssertJ + Testcontainers (MinIO container for prompt 03+) + RestAssured for REST | SQLite only for tests during Phase 1; Postgres compatibility deferred. |
+| Testing | JUnit 5 + AssertJ + Testcontainers (MinIO container from phase 3) + RestAssured for REST | SQLite only for tests through phase 2; Postgres compatibility deferred. |
 
 ## Module layout
 
@@ -208,11 +208,11 @@ Single OTLP gRPC exporter. Resource attributes:
 | `vectorstore.commit.segment_bytes` | Histogram | index_id | Size of resulting segment |
 | `vectorstore.query.duration` | Histogram | index_id, segment_count | Query wall time |
 | `vectorstore.query.nodes_visited` | Histogram | index_id | Graph search cost |
-| `vectorstore.storage.get.duration` | Histogram | cache_hit | Object-store GET latency (prompt 03+) |
+| `vectorstore.storage.get.duration` | Histogram | cache_hit | Object-store GET latency (phase 3+) |
 | `vectorstore.storage.get.bytes` | Counter | direction | Ingress / egress bytes |
 | `vectorstore.cache.block.hit` | Counter | | Block cache hits |
 | `vectorstore.cache.block.miss` | Counter | | Block cache misses |
-| `vectorstore.filter.compile.duration` | Histogram | | Filter compilation cost (prompt 04+) |
+| `vectorstore.filter.compile.duration` | Histogram | | Filter compilation cost (phase 4+) |
 
 Tags to **never** include: user-supplied IDs, API keys, raw vector values, raw attribute values. `index_id` is an internal UUID, not user content.
 
@@ -222,11 +222,11 @@ Quarkus auto-instruments HTTP, JDBI, and the Micrometer pipeline. Manual spans (
 
 - `vectorstore.commit.build` — graph build from write buffer
 - `vectorstore.commit.serialize` — write graph to local tempdir
-- `vectorstore.commit.upload` — upload segment files (prompt 03+)
+- `vectorstore.commit.upload` — upload segment files (phase 3+)
 - `vectorstore.query.fanout` — parent span for per-segment fan-out
 - `vectorstore.query.segment.search` — per-segment search, one child per active segment
-- `vectorstore.storage.range_get` — ranged object GET (prompt 03+)
-- `vectorstore.filter.compile` — filter predicate → Bits mask (prompt 04+)
+- `vectorstore.storage.range_get` — ranged object GET (phase 3+)
+- `vectorstore.filter.compile` — filter predicate → Bits mask (phase 4+)
 
 Span attributes: `index_id`, `segment_id`, `top_k`, `vector_count`, `cache_hit`. Never raw vectors or user attributes.
 
@@ -256,7 +256,7 @@ Configure in:
 
 - **Unit tests** per module, covering pure logic (domain objects, filter compilation, catalog SQL via an in-memory SQLite). Target: every module has tests; coverage is a signal, not a gate.
 - **Component / integration tests** in `vector-store-app` using `@QuarkusTest` and RestAssured. These drive the public REST surface end-to-end with real Quarkus wiring.
-- **Testcontainers** for MinIO starting in prompt 03. SQLite stays embedded in tests; Postgres compatibility is deferred.
+- **Testcontainers** for MinIO starting in phase 3. SQLite stays embedded in tests; Postgres compatibility is deferred.
 - **Determinism**: tests that involve random vectors use a fixed seed. Any test that asserts recall must use brute-force ground truth on the same seeded dataset.
 
 ## Engineering conventions

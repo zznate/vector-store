@@ -14,7 +14,7 @@
   <name>vector-store-metadata</name>
   <description>
     Per-segment attribute sidecar, tombstone bitmap, equality-filter compiler
-    producing Bits masks. Populated in prompt 04.
+    producing Bits masks. Populated in phase 4.
   </description>
 
   <dependencies>

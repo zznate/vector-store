@@ -21,12 +21,12 @@ Organised under `io.github.zznate.vectorstore.api`:
 - [`resource/`](src/main/java/io/github/zznate/vectorstore/api/resource) —
   JAX-RS endpoints.
 
-  | Class | Path prefix | Phase 1 status |
+  | Class | Path prefix | Status |
   |---|---|---|
-  | `BucketsResource` | `/v1/buckets` — admin-only | full CRUD |
-  | `IndexesResource` | `/v1/buckets/{bucket}/indexes` | full CRUD |
-  | `VectorsResource` | `/v1/indexes/{bucket}/{index}` | six 501 stubs, real impls land in prompts 02 / 04 |
-  | `CommitResource` | `/v1/indexes/{bucket}/{index}:commit` | 501 stub, real impl lands in prompt 02 |
+  | `BucketsResource` | `/v1/buckets` — admin-only | Full CRUD (phase 1) |
+  | `IndexesResource` | `/v1/buckets/{bucket}/indexes` | Full CRUD (phase 1) |
+  | `VectorsResource` | `/v1/indexes/{bucket}/{index}` | Put, query, delete, get, stats (phase 2) |
+  | `CommitResource` | `/v1/indexes/{bucket}/{index}:commit` | Real impl backed by `CommitCoordinator` (phase 2) |
 
   `CommitResource` lives separately because attaching `:commit` directly to
   the `{index}` path parameter on a class shared with `/vectors:put`-style

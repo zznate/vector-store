@@ -63,7 +63,7 @@ class VectorStoreExceptionMapperTest {
 
     assertThat(ex.status()).isEqualTo(Status.NOT_IMPLEMENTED);
     assertThat(ex.errorCode()).isEqualTo("not_implemented");
-    assertThat(ex.getMessage()).isEqualTo("vectors:put lands in prompt 02");
+    assertThat(ex.getMessage()).isEqualTo("vectors:put lands in phase 2");
   }
 
   @Test

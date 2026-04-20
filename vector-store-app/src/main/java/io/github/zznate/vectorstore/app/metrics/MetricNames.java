@@ -20,7 +20,7 @@ public final class MetricNames {
   /** Counter: vectors accepted into an index's write buffer. */
   public static final String PUT_VECTORS = "vectorstore.put.vectors";
 
-  // --- Commit (prompt 02+) ------------------------------------------------
+  // --- Commit (phase 2+) --------------------------------------------------
 
   /** Timer: wall time of a commit, broken down by phase tag. */
   public static final String COMMIT_DURATION = "vectorstore.commit.duration";
@@ -28,7 +28,7 @@ public final class MetricNames {
   /** DistributionSummary: bytes of the segment produced by a commit. */
   public static final String COMMIT_SEGMENT_BYTES = "vectorstore.commit.segment_bytes";
 
-  // --- Query (prompt 02+) -------------------------------------------------
+  // --- Query (phase 2+) ---------------------------------------------------
 
   /** Timer: wall time of a query fan-out + merge. */
   public static final String QUERY_DURATION = "vectorstore.query.duration";
@@ -36,7 +36,7 @@ public final class MetricNames {
   /** DistributionSummary: graph nodes visited during a query. */
   public static final String QUERY_NODES_VISITED = "vectorstore.query.nodes_visited";
 
-  // --- Storage (prompt 03+) -----------------------------------------------
+  // --- Storage (phase 3+) -------------------------------------------------
 
   /** Timer: ranged object-store GET latency, tagged by cache_hit. */
   public static final String STORAGE_GET_DURATION = "vectorstore.storage.get.duration";
@@ -50,7 +50,7 @@ public final class MetricNames {
   /** Counter: block-cache misses. */
   public static final String CACHE_BLOCK_MISS = "vectorstore.cache.block.miss";
 
-  // --- Filter (prompt 04+) ------------------------------------------------
+  // --- Filter (phase 4+) --------------------------------------------------
 
   /** Timer: cost to compile a filter predicate into a Bits mask. */
   public static final String FILTER_COMPILE_DURATION = "vectorstore.filter.compile.duration";

@@ -9,8 +9,8 @@ layout and Phase 1 latency target.
 
 ## Status
 
-**Empty shell** in Phase 1's bootstrap prompt. Contains only a
-`package-info.java`. Real content lands in **prompt 03 (minio)**.
+**Empty shell** through phase 2. Contains only a `package-info.java`.
+Real content lands in **phase 3 (minio)**.
 
 ## Role (when populated)
 
@@ -23,20 +23,20 @@ the service.
 
 ## Public surface (planned)
 
-Defined in prompt 03. Expected entry point: a `SegmentReaderFactory` that,
-given a `Segment` from
-[`vector-store-core`](../vector-store-core/README.md), returns a JVector
-`RandomAccessReader`. Block cache is internal.
+Defined in phase 3. Will provide an S3-backed implementation of
+[`core.segment.SegmentStore`](../vector-store-core/src/main/java/io/github/zznate/vectorstore/core/segment/SegmentStore.java)
+(the same interface `vector-store-engine`'s `LocalSegmentStore` already
+implements), plus an on-heap block cache for the ranged-GET path.
 
 ## Dependencies
 
 - [`vector-store-core`](../vector-store-core/README.md) for the catalog
   records.
-- `software.amazon.awssdk:s3` — arrives in prompt 03.
+- `software.amazon.awssdk:s3` — arrives in phase 3.
 
 ## Local development
 
-Nothing to run yet. Prompt 03 introduces Testcontainers-backed MinIO for
+Nothing to run yet. Phase 3 introduces Testcontainers-backed MinIO for
 integration tests (`*IT.java`, driven by Failsafe in `./mvnw verify`).
 
 ## Not in this module

@@ -42,10 +42,11 @@ attribute sidecar, tombstone bits AND-ed into the accept mask.
 |---|---|---|
 | [`vector-store-core`](vector-store-core/README.md) | Domain records, repository interfaces, JDBI implementations, Flyway migrations | Phase 1 populated |
 | [`vector-store-api`](vector-store-api/README.md) | REST resources, DTOs, API-key auth filter, exception mapper | Phase 1 populated |
-| [`vector-store-engine`](vector-store-engine/README.md) | JVector adapter: builder, on-disk writer, searcher | Lands in prompt 02 |
-| [`vector-store-storage`](vector-store-storage/README.md) | S3 client wiring, ranged-GET reader, block cache | Lands in prompt 03 |
-| [`vector-store-metadata`](vector-store-metadata/README.md) | Per-segment attribute sidecar + filter compiler | Lands in prompt 04 |
+| [`vector-store-engine`](vector-store-engine/README.md) | JVector adapter: write buffer, segment builder, local-disk `SegmentStore`, searcher, commit + query coordinators | Phase 2 populated |
+| [`vector-store-storage`](vector-store-storage/README.md) | S3 client wiring, ranged-GET reader, block cache | Lands in phase 3 |
+| [`vector-store-metadata`](vector-store-metadata/README.md) | Per-segment attribute sidecar + filter compiler | Lands in phase 4 |
 | [`vector-store-app`](vector-store-app/README.md) | Quarkus bootstrap, CDI producers, startup seeding, main entrypoint | Phase 1 populated |
+| [`vector-store-datagen`](vector-store-datagen/README.md) | Offline tooling: recall-fixture generation, demo-data seeding | Outside the service module graph; never run by CI |
 
 ## Tech stack
 
@@ -123,8 +124,9 @@ ignored. The secret is hashed with Argon2id before storage.
 ./mvnw -pl vector-store-core test   # one module only
 ```
 
-Phase 1 tests do not connect to any external service. Testcontainers-backed
-MinIO tests land with `vector-store-storage` in prompt 03.
+Tests do not connect to any external service through phase 2.
+Testcontainers-backed MinIO tests land with `vector-store-storage` in
+phase 3.
 
 ## Configuration
 

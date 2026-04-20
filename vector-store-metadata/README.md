@@ -7,8 +7,8 @@ and the "deletes are tombstone bits" invariant.
 
 ## Status
 
-**Empty shell** in Phase 1's bootstrap prompt. Contains only a
-`package-info.java`. Real content lands in **prompt 04 (filters)**.
+**Empty shell** through phase 3. Contains only a `package-info.java`.
+Real content lands in **phase 4 (filters)**.
 
 ## Role (when populated)
 
@@ -20,7 +20,7 @@ deletes are tombstone bits — the graph file is never rewritten.
 
 ## Public surface (planned)
 
-Defined in prompt 04. Expected entry points: an `AttributeSidecar` reader /
+Defined in phase 4. Expected entry points: an `AttributeSidecar` reader /
 writer, a `FilterCompiler` that emits a `Bits` mask, and a `TombstoneBitmap`
 type. The filter predicate format evolves independently of the graph in
 Phase 2.
@@ -29,12 +29,12 @@ Phase 2.
 
 - [`vector-store-core`](../vector-store-core/README.md) for the domain
   model.
-- `org.roaringbitmap:RoaringBitmap` — arrives in prompt 04.
-- `com.fasterxml.jackson.core:jackson-databind` — arrives in prompt 04.
+- `org.roaringbitmap:RoaringBitmap` — arrives in phase 4.
+- `com.fasterxml.jackson.core:jackson-databind` — arrives in phase 4.
 
 ## Local development
 
-Nothing to run yet. Prompt 04 adds unit tests for sidecar round-trips and
+Nothing to run yet. Phase 4 adds unit tests for sidecar round-trips and
 filter compilation against a seeded dataset.
 
 ## Not in this module
