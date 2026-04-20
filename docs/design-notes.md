@@ -208,8 +208,8 @@ Single OTLP gRPC exporter. Resource attributes:
 | `vectorstore.commit.segment_bytes` | Histogram | index_id | Size of resulting segment |
 | `vectorstore.query.duration` | Histogram | index_id, segment_count | Query wall time |
 | `vectorstore.query.nodes_visited` | Histogram | index_id | Graph search cost |
-| `vectorstore.storage.get.duration` | Histogram | cache_hit | Object-store GET latency (phase 3+) |
-| `vectorstore.storage.get.bytes` | Counter | direction | Ingress / egress bytes |
+| `vectorstore.storage.get.duration` | Histogram | cache_hit | Object-store GET latency; `cache_hit=true` on block-cache hits, `false` on ranged `GetObject` misses |
+| `vectorstore.storage.get.bytes` | Counter | direction | Bytes transferred against the object store (`direction=download`) |
 | `vectorstore.cache.block.hit` | Counter | | Block cache hits |
 | `vectorstore.cache.block.miss` | Counter | | Block cache misses |
 | `vectorstore.filter.compile.duration` | Histogram | | Filter compilation cost (phase 4+) |
@@ -222,10 +222,9 @@ Quarkus auto-instruments HTTP, JDBI, and the Micrometer pipeline. Manual spans (
 
 - `vectorstore.commit.build` — graph build from write buffer
 - `vectorstore.commit.serialize` — write graph to local tempdir
-- `vectorstore.commit.upload` — upload segment files (phase 3+)
 - `vectorstore.query.fanout` — parent span for per-segment fan-out
 - `vectorstore.query.segment.search` — per-segment search, one child per active segment
-- `vectorstore.storage.range_get` — ranged object GET (phase 3+)
+- `vectorstore.storage.range_get` — ranged object GET, one per block-cache miss
 - `vectorstore.filter.compile` — filter predicate → Bits mask (phase 4+)
 
 Span attributes: `index_id`, `segment_id`, `top_k`, `vector_count`, `cache_hit`. Never raw vectors or user attributes.
@@ -238,6 +237,7 @@ JSON via `quarkus-logging-json`. Trace/span IDs auto-correlated. Log events at I
 
 - `%dev` — `quarkus.otel.sdk.disabled=true`, console logging (non-JSON for readability).
 - `%test` — same as dev; tests assert on metrics via the Micrometer registry, not by exporting.
+- `%test-local` — alias for developers running the app without Docker: overrides `vectorstore.segments.store=local` so the phase-2 `LocalSegmentStore` is produced and no MinIO is required.
 - `%prod` — `quarkus.otel.exporter.otlp.endpoint=http://otel-collector.stepflow-o11y:4317`, JSON logging.
 
 ## Launch flags (every profile)

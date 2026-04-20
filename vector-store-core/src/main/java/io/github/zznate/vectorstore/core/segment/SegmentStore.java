@@ -1,6 +1,6 @@
 package io.github.zznate.vectorstore.core.segment;
 
-import io.github.jbellis.jvector.disk.RandomAccessReader;
+import io.github.jbellis.jvector.disk.ReaderSupplier;
 import io.github.zznate.vectorstore.core.catalog.model.Segment;
 import java.io.IOException;
 import java.io.InputStream;
@@ -24,11 +24,15 @@ public interface SegmentStore {
   URI publish(BuiltSegment local, String objectPrefix) throws IOException;
 
   /**
-   * Open the on-disk graph file ({@code graph.jvec}) for the given segment
-   * as a JVector {@link RandomAccessReader}. Callers are responsible for
-   * closing the reader when done.
+   * Return a {@link ReaderSupplier} for the segment's on-disk graph
+   * ({@code graph.jvec}). Callers pass the supplier to JVector, which may
+   * invoke {@link ReaderSupplier#get()} more than once internally (e.g.
+   * once for the header and once per {@link
+   * io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex.View}). The
+   * supplier is owned by the store and cached per segment: callers must not
+   * close it; the store releases every cached supplier on shutdown.
    */
-  RandomAccessReader openGraph(Segment segment) throws IOException;
+  ReaderSupplier openGraph(Segment segment) throws IOException;
 
   /**
    * Open a named sidecar file (e.g. {@code ordinals.jsonl},

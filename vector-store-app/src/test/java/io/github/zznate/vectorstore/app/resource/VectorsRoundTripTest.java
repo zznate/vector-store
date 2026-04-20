@@ -7,9 +7,11 @@ import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.is;
 
 import io.github.zznate.vectorstore.api.auth.ApiKeyAuthenticationFilter;
+import io.github.zznate.vectorstore.app.testprofile.LocalSegmentStoreProfile;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.junit.TestProfile;
 import io.restassured.http.ContentType;
 import io.restassured.response.Response;
 import jakarta.inject.Inject;
@@ -30,6 +32,7 @@ import org.junit.jupiter.api.Test;
  * removes them.
  */
 @QuarkusTest
+@TestProfile(LocalSegmentStoreProfile.class)
 class VectorsRoundTripTest extends AbstractResourceTest {
 
   private static final String BUCKET = DEMO_BUCKET;

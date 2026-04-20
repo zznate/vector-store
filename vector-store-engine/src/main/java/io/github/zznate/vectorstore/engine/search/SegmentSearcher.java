@@ -1,7 +1,7 @@
 package io.github.zznate.vectorstore.engine.search;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.github.jbellis.jvector.disk.RandomAccessReader;
+import io.github.jbellis.jvector.disk.ReaderSupplier;
 import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.graph.SearchResult;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex;
@@ -82,9 +82,15 @@ public class SegmentSearcher implements Searcher {
             .setAttribute("segment_id", segment.segmentId())
             .setAttribute("index_id", segment.indexId())
             .startSpan();
+    ReaderSupplier readerSupplier;
+    try {
+      readerSupplier = segmentStore.openGraph(segment);
+    } catch (IOException e) {
+      span.end();
+      throw new UncheckedIOException(e);
+    }
     try (Scope ignored = span.makeCurrent();
-        RandomAccessReader reader = segmentStore.openGraph(segment);
-        OnDiskGraphIndex onDiskGraph = OnDiskGraphIndex.load(() -> reader);
+        OnDiskGraphIndex onDiskGraph = OnDiskGraphIndex.load(readerSupplier);
         OnDiskGraphIndex.View view = onDiskGraph.getView()) {
       SearchResult result =
           GraphSearcher.search(query, topK, view, similarity, onDiskGraph, accept);

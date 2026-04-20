@@ -43,7 +43,7 @@ attribute sidecar, tombstone bits AND-ed into the accept mask.
 | [`vector-store-core`](vector-store-core/README.md) | Domain records, repository interfaces, JDBI implementations, Flyway migrations | Phase 1 populated |
 | [`vector-store-api`](vector-store-api/README.md) | REST resources, DTOs, API-key auth filter, exception mapper | Phase 1 populated |
 | [`vector-store-engine`](vector-store-engine/README.md) | JVector adapter: write buffer, segment builder, local-disk `SegmentStore`, searcher, commit + query coordinators | Phase 2 populated |
-| [`vector-store-storage`](vector-store-storage/README.md) | S3 client wiring, ranged-GET reader, block cache | Lands in phase 3 |
+| [`vector-store-storage`](vector-store-storage/README.md) | S3 client wiring, ranged-GET reader, block cache | Phase 3 populated |
 | [`vector-store-metadata`](vector-store-metadata/README.md) | Per-segment attribute sidecar + filter compiler | Lands in phase 4 |
 | [`vector-store-app`](vector-store-app/README.md) | Quarkus bootstrap, CDI producers, startup seeding, main entrypoint | Phase 1 populated |
 | [`vector-store-datagen`](vector-store-datagen/README.md) | Offline tooling: recall-fixture generation, demo-data seeding | Outside the service module graph; never run by CI |
@@ -79,6 +79,31 @@ Failsafe (integration) tests. JVM flags for the Panama Vector API are set in
 the parent POM so JVector exercises its SIMD code path during tests.
 
 ## Run locally
+
+### 1. Start MinIO
+
+Phase 3 persists every segment to an S3-compatible object store. A
+`docker-compose.yml` at the repo root brings up a single-node MinIO and
+auto-creates the `vectorstore` bucket on first start:
+
+```
+docker-compose up -d minio
+docker-compose logs mc-init   # confirms "bucket ready: vectorstore"
+```
+
+The S3 API is on `http://localhost:9000`; the admin console on
+`http://localhost:9001` (root credentials default to `minioadmin`).
+Credentials and bucket name are overridable via `.env` — see the variable
+list below.
+
+If you want to work without Docker, launch the app under the `test-local`
+profile to fall back to the phase-2 local-filesystem segment store:
+
+```
+./mvnw -pl vector-store-app quarkus:dev -Dquarkus.profile=test-local
+```
+
+### 2. Start the service
 
 ```
 ./mvnw -pl vector-store-app quarkus:dev
@@ -124,9 +149,10 @@ ignored. The secret is hashed with Argon2id before storage.
 ./mvnw -pl vector-store-core test   # one module only
 ```
 
-Tests do not connect to any external service through phase 2.
-Testcontainers-backed MinIO tests land with `vector-store-storage` in
-phase 3.
+Unit tests and the default `%test` component tests run offline. The phase-3
+MinIO-backed integration tests bring their own MinIO via Testcontainers, so
+`./mvnw verify` continues to work without a running docker-compose stack —
+the tests start and stop their own container.
 
 ## Configuration
 
@@ -155,6 +181,11 @@ reference):
 |---|---|---|
 | `VECTORSTORE_DB_PATH` | SQLite catalog file | `./vector-store.db` |
 | `VECTORSTORE_BOOTSTRAP_ADMIN_KEY` | `keyId.secret` token to seed the first admin key | unset |
+| `VECTORSTORE_STORAGE_ENDPOINT` | S3 endpoint URL | `http://localhost:9000` |
+| `VECTORSTORE_STORAGE_REGION` | AWS region (required by the SDK; ignored by MinIO) | `us-east-1` |
+| `VECTORSTORE_STORAGE_BUCKET` | Bucket holding every segment | `vectorstore` |
+| `VECTORSTORE_STORAGE_ACCESS_KEY` | S3 access key | `minioadmin` |
+| `VECTORSTORE_STORAGE_SECRET_KEY` | S3 secret key | `minioadmin` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP collector endpoint | `http://localhost:4317` |
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | OTLP protocol | `grpc` |
 

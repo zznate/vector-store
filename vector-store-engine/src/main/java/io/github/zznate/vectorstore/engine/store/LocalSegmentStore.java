@@ -1,6 +1,5 @@
 package io.github.zznate.vectorstore.engine.store;
 
-import io.github.jbellis.jvector.disk.RandomAccessReader;
 import io.github.jbellis.jvector.disk.ReaderSupplier;
 import io.github.jbellis.jvector.disk.SimpleMappedReader;
 import io.github.zznate.vectorstore.core.catalog.model.Segment;
@@ -24,9 +23,10 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>Graph files are memory-mapped once per segment and the
  * {@link ReaderSupplier} is cached so concurrent queries against the same
- * segment share the mapping. Callers receive a fresh {@link RandomAccessReader}
- * view per {@link #openGraph} call; the reader's {@code close()} is a no-op
- * by JVector's design. Mappings are released at {@link #close()}.
+ * segment share the mapping. {@link #openGraph} returns the cached supplier
+ * directly; callers must not close it (JVector's {@code OnDiskGraphIndex}
+ * pulls fresh per-view readers via {@code supplier.get()}). Mappings are
+ * released at {@link #close()}.
  */
 public class LocalSegmentStore implements SegmentStore, AutoCloseable {
 
@@ -52,10 +52,8 @@ public class LocalSegmentStore implements SegmentStore, AutoCloseable {
   }
 
   @Override
-  public RandomAccessReader openGraph(Segment segment) throws IOException {
-    ReaderSupplier supplier =
-        graphSuppliers.computeIfAbsent(segment.segmentId(), id -> createSupplier(segment));
-    return supplier.get();
+  public ReaderSupplier openGraph(Segment segment) {
+    return graphSuppliers.computeIfAbsent(segment.segmentId(), id -> createSupplier(segment));
   }
 
   @Override

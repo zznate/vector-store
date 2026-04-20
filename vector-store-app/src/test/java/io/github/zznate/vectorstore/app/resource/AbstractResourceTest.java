@@ -17,7 +17,7 @@ import org.junit.jupiter.api.BeforeEach;
  *
  * <p>Subclasses add their own {@code @QuarkusTest} annotation.
  */
-abstract class AbstractResourceTest {
+public abstract class AbstractResourceTest {
 
   protected static final String ADMIN_TOKEN = "admin-test.admin-secret";
   protected static final String DEMO_TOKEN = "demo-test.demo-secret";
@@ -26,10 +26,10 @@ abstract class AbstractResourceTest {
   protected static final String DEMO_BUCKET = "demo";
   protected static final String OTHER_BUCKET = "other";
 
-  @Inject Jdbi jdbi;
-  @Inject ApiKeyRepository apiKeys;
-  @Inject PasswordHasher hasher;
-  @Inject Clock clock;
+  @Inject protected Jdbi jdbi;
+  @Inject protected ApiKeyRepository apiKeys;
+  @Inject protected PasswordHasher hasher;
+  @Inject protected Clock clock;
 
   @BeforeAll
   static void disableRestAssuredUrlEncoding() {
