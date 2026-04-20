@@ -4,7 +4,9 @@ Shared context for the implementation prompts. Treat this document as authoritat
 
 ## Project goal
 
-Expose a vector-database API whose underlying index uses JVector and whose segment storage lives on any S3-compatible object store. Phase 1 targets infrequent-query workloads ("cold archive"): build an index, write it once to object storage, serve queries against it with acceptable (100–500ms) latency. Phase 2 will layer warm-query caching and LSM-shaped compaction on top of the same data model.
+Expose a vector-database API whose underlying index uses JVector and whose segment storage lives on any S3-compatible object store. Phase 1 targets infrequent-query workloads similar to a "cold archive": build an index, write it once to object storage, serve queries against it with acceptable (100–500ms) latency. The goal with this initial phase is effectively service-ifying JVector with a modern front-end (Quarkus) and implemeting S3-compatible file writers. 
+
+Phase 2 will layer warm-query caching and LSM-shaped compaction on top of the same data model to offer more adaptable use cases beyond cold archive.
 
 ## Phase 1 invariants (must not regress)
 
@@ -45,7 +47,7 @@ vector-store-parent/                  # Maven parent POM
 └── vector-store-app                  # Quarkus bootstrap, datasource + OTel config, CDI wiring, main entrypoint
 ```
 
-Dependency rules:
+Module dependency rules:
 
 - `storage` and `metadata` depend only on `core`.
 - `engine` depends on `core` and on `metadata`. At commit time the
@@ -65,10 +67,6 @@ Dependency rules:
 - `app` depends on all other modules and owns runtime configuration.
 - No other sibling-to-sibling module dependencies. No circular deps.
 - Shared types live in `core`. Do not create a `commons` dumping ground.
-
-### Suggested Java package root
-
-`io.github.zznate.vectorstore` — override at scaffold time if you prefer a different group.
 
 ## Public API shape
 
@@ -111,11 +109,11 @@ public record QueryResponse(List<QueryHit> hits) {}
 public record QueryHit(String id, float score, Map<String, String> attributes) {}
 ```
 
-All DTOs are Java records. Validation via Bean Validation annotations.
+All DTOs are Java records with initial validation via Bean Validation annotations.
 
 ## Object-store layout
 
-All segments for an index share a common prefix. Never rename or rewrite files once written.
+All segments for an index share a common prefix. Files are considered immutable and are thus never renamed or rewritten. 
 
 ```
 s3://<bucket>/vectorstore/<bucket-id>/<index-id>/
@@ -133,7 +131,7 @@ The `manifest.json` at the index level lists active segments. Writes to it are s
 
 ## Catalog schema (Phase 1, SQLite)
 
-Written in standard-ish SQL. Migration files live at `vector-store-core/src/main/resources/db/migration/` as `V1__initial.sql`, etc.
+Written in standard-ish SQL. Migration files live at `vector-store-core/src/main/resources/db/migration/` as `V1__initial.sql`, etc. We've purposely kept things simple for portability and ease of understanding for this initial system. 
 
 ```sql
 CREATE TABLE api_key (
@@ -197,7 +195,7 @@ Repository interfaces in `vector-store-core/catalog/repository/`. JDBI-backed im
 | Subspace cluster count | 256 (1 byte/subspace) | PQ default |
 | Inline storage | `InlineVectors` Phase 1 (simpler); consider `FusedPQ` in Phase 2 | |
 
-All configurable per-index via `engine_params` JSON at index-creation time. Defaults applied when omitted.
+All configurable per-index via `engine_params` JSON at index-creation time. The listed defaults applied when omitted.
 
 ## Observability plan
 

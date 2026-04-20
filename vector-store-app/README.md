@@ -94,6 +94,43 @@ in the catalog (`bucket_id IS NULL`), the secret is hashed with Argon2id
 and a new admin `ApiKey` is created. Otherwise the variable is ignored.
 Bootstrap is idempotent; do not rely on it for key rotation.
 
+The token format is a single literal split on the first `.`: everything
+before becomes `api_key.key_id`, everything after is the plaintext secret.
+Dots in the secret are fine; dots in the keyId are not. The plaintext is
+never persisted — only the Argon2id hash is.
+
+#### Resetting the bootstrap key during local dev
+
+Because bootstrap is idempotent, changing
+`VECTORSTORE_BOOTSTRAP_ADMIN_KEY` on an existing database is a no-op.
+There is no `/v1/api-keys` endpoint today; to rotate the key during local
+iteration, clear the catalog row directly.
+
+Nuke the whole catalog (simplest; also wipes buckets / indexes /
+segments — fine in dev):
+
+```
+rm ./vector-store.db
+export VECTORSTORE_BOOTSTRAP_ADMIN_KEY='admin-local.new-secret'
+./mvnw -pl vector-store-app quarkus:dev
+```
+
+Or, keep the catalog and drop only the admin key so the next startup
+re-seeds from the env var:
+
+```
+sqlite3 ./vector-store.db "DELETE FROM api_key WHERE bucket_id IS NULL;"
+export VECTORSTORE_BOOTSTRAP_ADMIN_KEY='admin-local.new-secret'
+./mvnw -pl vector-store-app quarkus:dev
+```
+
+The second form preserves buckets, indexes, and any bucket-scoped keys;
+it only drops rows where `bucket_id IS NULL` (the admin-scope marker).
+If you want to inspect without deleting, `sqlite3 ./vector-store.db
+"SELECT key_id, bucket_id, created_at FROM api_key;"` shows the full
+set — the stored `secret_hash` is Argon2id, so nothing sensitive leaks
+from that query.
+
 ## Local development
 
 ```

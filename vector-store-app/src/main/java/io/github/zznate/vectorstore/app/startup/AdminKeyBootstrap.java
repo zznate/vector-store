@@ -46,6 +46,7 @@ public class AdminKeyBootstrap {
   void onStart(@Observes StartupEvent event) {
     String token = bootstrapAdminKey.orElse("");
     if (token.isBlank()) {
+      LOG.info("Bootstrap admin key not present: development mode only");
       return;
     }
     if (apiKeys.adminKeyExists()) {
