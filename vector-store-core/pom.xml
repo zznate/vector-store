@@ -68,6 +68,19 @@
       <artifactId>flyway-core</artifactId>
     </dependency>
 
+    <!-- Caffeine backs the shared HeapCacheTier implementation. -->
+    <dependency>
+      <groupId>com.github.ben-manes.caffeine</groupId>
+      <artifactId>caffeine</artifactId>
+    </dependency>
+
+    <!-- Micrometer API for the cache-tier metrics surface. -->
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-core</artifactId>
+      <scope>provided</scope>
+    </dependency>
+
     <!-- Tests -->
     <dependency>
       <groupId>org.junit.jupiter</groupId>

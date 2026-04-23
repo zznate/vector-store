@@ -37,7 +37,7 @@ class BlockCachingRandomAccessReaderTest {
       objectBytes[i] = (byte) i;
     }
     underlying = new CountingUnderlying(objectBytes);
-    cache = new BlockCache(1 << 20);
+    cache = new BlockCache(1 << 20, registry);
   }
 
   @Test
@@ -114,7 +114,7 @@ class BlockCachingRandomAccessReaderTest {
   @Test
   void byteWeightedEvictionDropsOldBlocksWhenBudgetExceeded() throws Exception {
     // Budget = 2 blocks worth (32 bytes); fill 3 blocks -> eviction.
-    BlockCache tinyCache = new BlockCache(BLOCK_SIZE * 2L);
+    BlockCache tinyCache = new BlockCache(BLOCK_SIZE * 2L, registry);
     try (BlockCachingRandomAccessReader reader =
         new BlockCachingRandomAccessReader(
             underlying, OBJECT_KEY, BLOCK_SIZE, objectBytes.length, tinyCache, registry)) {
@@ -153,11 +153,15 @@ class BlockCachingRandomAccessReaderTest {
   }
 
   private double cacheHits() {
-    return registry.counter("vectorstore.cache.block.hit").count();
+    return registry
+        .counter("vectorstore.cache.hit", "tier", "l1_heap", "cache_name", "block")
+        .count();
   }
 
   private double cacheMisses() {
-    return registry.counter("vectorstore.cache.block.miss").count();
+    return registry
+        .counter("vectorstore.cache.miss", "tier", "l1_heap", "cache_name", "block")
+        .count();
   }
 
   /**

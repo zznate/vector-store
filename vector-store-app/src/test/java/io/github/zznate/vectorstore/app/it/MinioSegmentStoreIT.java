@@ -35,8 +35,9 @@ import software.amazon.awssdk.services.s3.model.S3Object;
  *       {@code <bucket-id>/<index-id>/<segment-id>/graph.jvec} (+ sidecars).
  *   </li>
  *   <li>Warm query after a cold query increments
- *       {@code vectorstore.cache.block.hit} strictly more than the cold
- *       pass, confirming the block cache is in the read path.</li>
+ *       {@code vectorstore.cache.hit{tier=l1_heap, cache_name=block}}
+ *       strictly more than the cold pass, confirming the block cache is
+ *       in the read path.</li>
  *   <li>Key storage meters emit during a real workload.</li>
  * </ul>
  */
@@ -140,7 +141,11 @@ class MinioSegmentStoreIT extends AbstractResourceTest {
     query[0] = 1f;
     String body = queryBody(query, 5);
 
-    Counter hits = meterRegistry.find("vectorstore.cache.block.hit").counter();
+    Counter hits = meterRegistry
+            .find("vectorstore.cache.hit")
+            .tag("tier", "l1_heap")
+            .tag("cache_name", "block")
+            .counter();
     double hitsBefore = hits == null ? 0 : hits.count();
 
     // Cold query.
@@ -152,7 +157,11 @@ class MinioSegmentStoreIT extends AbstractResourceTest {
             .when()
             .post(indexPath() + "/vectors:query");
     cold.then().statusCode(200);
-    Counter hitsCounter = meterRegistry.find("vectorstore.cache.block.hit").counter();
+    Counter hitsCounter = meterRegistry
+            .find("vectorstore.cache.hit")
+            .tag("tier", "l1_heap")
+            .tag("cache_name", "block")
+            .counter();
     double hitsAfterCold = hitsCounter == null ? 0 : hitsCounter.count();
 
     // Warm query — identical vector, identical topK.
@@ -165,7 +174,11 @@ class MinioSegmentStoreIT extends AbstractResourceTest {
             .post(indexPath() + "/vectors:query");
     warm.then().statusCode(200);
     double hitsAfterWarm =
-        meterRegistry.find("vectorstore.cache.block.hit").counter().count();
+        meterRegistry
+            .find("vectorstore.cache.hit")
+            .tag("tier", "l1_heap")
+            .tag("cache_name", "block")
+            .counter().count();
 
     assertThat(hitsAfterWarm - hitsAfterCold)
         .as("warm query must register strictly more block-cache hits than the cold pass")

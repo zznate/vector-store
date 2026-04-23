@@ -3,7 +3,6 @@ package io.github.zznate.vectorstore.storage.reader;
 import io.github.jbellis.jvector.disk.RandomAccessReader;
 import io.github.zznate.vectorstore.storage.cache.BlockCache;
 import io.github.zznate.vectorstore.storage.cache.BlockKey;
-import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import java.io.IOException;
@@ -16,13 +15,14 @@ import java.util.concurrent.TimeUnit;
  * {@link BlockCache}, falling back to a wrapped reader for cold blocks.
  *
  * <p>Every read is split into fixed-size logical blocks (key size:
- * {@code vectorstore.storage.block-cache.block-size}). Each block is either
- * already present in the cache ({@code vectorstore.cache.block.hit}) or
- * loaded through the underlying reader ({@code vectorstore.cache.block.miss}).
- * Hits record a {@code vectorstore.storage.get.duration} sample tagged
- * {@code cache_hit=true}; misses flow through the underlying reader, which
- * records its own {@code cache_hit=false} sample and the transferred-bytes
- * counter.
+ * {@code vectorstore.storage.block-cache.block-size}). Hit / miss / eviction
+ * accounting lives in the underlying {@link BlockCache} tier and surfaces
+ * through {@code vectorstore.cache.hit} / {@code .miss} /
+ * {@code .eviction} counters tagged {@code tier=l1_heap} and
+ * {@code cache_name=block}. This decorator only records the latency
+ * distribution tagged by outcome: {@code vectorstore.storage.get.duration}
+ * with {@code cache_hit=true} on hits and {@code cache_hit=false} on the
+ * cold-block path.
  *
  * <p>The decorator is per-thread stateful, mirroring JVector's reader
  * contract. Multiple decorator instances can concurrently probe the same
@@ -31,8 +31,6 @@ import java.util.concurrent.TimeUnit;
 public final class BlockCachingRandomAccessReader implements RandomAccessReader {
 
   private static final String METER_GET_DURATION = "vectorstore.storage.get.duration";
-  private static final String METER_CACHE_HIT = "vectorstore.cache.block.hit";
-  private static final String METER_CACHE_MISS = "vectorstore.cache.block.miss";
   private static final String TAG_CACHE_HIT = "cache_hit";
 
   private final RangeReader underlying;
@@ -185,14 +183,12 @@ public final class BlockCachingRandomAccessReader implements RandomAccessReader 
     byte[] block = cache.getIfPresent(key);
     if (block != null) {
       long startNanos = System.nanoTime();
-      Counter.builder(METER_CACHE_HIT).register(meterRegistry).increment();
       Timer.builder(METER_GET_DURATION)
           .tag(TAG_CACHE_HIT, "true")
           .register(meterRegistry)
           .record(System.nanoTime() - startNanos, TimeUnit.NANOSECONDS);
       return block;
     }
-    Counter.builder(METER_CACHE_MISS).register(meterRegistry).increment();
     long blockStart = blockIndex * ((long) blockSize);
     int len = (int) Math.min(blockSize, objectLength - blockStart);
     if (len <= 0) {

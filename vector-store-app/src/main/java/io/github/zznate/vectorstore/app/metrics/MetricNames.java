@@ -44,11 +44,22 @@ public final class MetricNames {
   /** Counter: bytes transferred, tagged by direction. */
   public static final String STORAGE_GET_BYTES = "vectorstore.storage.get.bytes";
 
-  /** Counter: block-cache hits. */
-  public static final String CACHE_BLOCK_HIT = "vectorstore.cache.block.hit";
+  // --- Cache tiers (phase 5+) ---------------------------------------------
 
-  /** Counter: block-cache misses. */
-  public static final String CACHE_BLOCK_MISS = "vectorstore.cache.block.miss";
+  /** Counter: cache hits, tagged by tier + cache_name. */
+  public static final String CACHE_HIT = "vectorstore.cache.hit";
+
+  /** Counter: cache misses, tagged by tier + cache_name. */
+  public static final String CACHE_MISS = "vectorstore.cache.miss";
+
+  /** Counter: cache evictions, tagged by tier + cache_name. */
+  public static final String CACHE_EVICTION = "vectorstore.cache.eviction";
+
+  /** Gauge: current bytes held by a cache tier. */
+  public static final String CACHE_BYTES_CURRENT = "vectorstore.cache.bytes.current";
+
+  /** Gauge: current entry count in a cache tier. */
+  public static final String CACHE_ENTRIES_CURRENT = "vectorstore.cache.entries.current";
 
   // --- Filter (phase 4+) --------------------------------------------------
 
@@ -62,4 +73,6 @@ public final class MetricNames {
   public static final String TAG_PHASE = "phase";
   public static final String TAG_CACHE_HIT = "cache_hit";
   public static final String TAG_DIRECTION = "direction";
+  public static final String TAG_TIER = "tier";
+  public static final String TAG_CACHE_NAME = "cache_name";
 }

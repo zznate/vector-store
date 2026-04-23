@@ -1,6 +1,7 @@
 package io.github.zznate.vectorstore.metadata.sidecar;
 
 import io.github.zznate.vectorstore.metadata.config.MetadataConfig;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Produces;
 import jakarta.inject.Singleton;
@@ -9,9 +10,9 @@ import org.slf4j.LoggerFactory;
 
 /**
  * Produces the process-wide {@link SidecarCache}. Size taken from
- * {@code vectorstore.metadata.sidecar-cache.bytes}. The cache is kept
- * simple on purpose: phase-2 multi-tier caching (disk, Redis) will layer
- * behind this same type without a signature change.
+ * {@code vectorstore.metadata.sidecar-cache.bytes}. The cache delegates to
+ * a shared {@code HeapCacheTier} so it participates in the standard
+ * cache-tier metrics surface.
  */
 @ApplicationScoped
 public class SidecarCacheProducer {
@@ -20,11 +21,11 @@ public class SidecarCacheProducer {
 
   @Produces
   @Singleton
-  public SidecarCache sidecarCache(MetadataConfig config) {
+  public SidecarCache sidecarCache(MetadataConfig config, MeterRegistry meterRegistry) {
     long bytes = config.sidecarCache().bytes();
     if (LOG.isInfoEnabled()) {
       LOG.info("Initialising sidecar cache budget={} bytes", bytes);
     }
-    return new SidecarCache(bytes);
+    return new SidecarCache(bytes, meterRegistry);
   }
 }

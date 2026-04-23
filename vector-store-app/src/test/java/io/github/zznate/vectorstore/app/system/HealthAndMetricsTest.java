@@ -44,8 +44,9 @@ class HealthAndMetricsTest {
                 containsString("vectorstore_commit_duration"),
                 containsString("vectorstore_query_duration"),
                 containsString("vectorstore_storage_get_duration"),
-                containsString("vectorstore_cache_block_hit"),
-                containsString("vectorstore_cache_block_miss"),
+                containsString("vectorstore_cache_hit"),
+                containsString("vectorstore_cache_miss"),
+                containsString("vectorstore_cache_eviction"),
                 containsString("vectorstore_filter_compile_duration")));
   }
 }

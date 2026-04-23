@@ -217,8 +217,11 @@ Single OTLP gRPC exporter. Resource attributes:
 | `vectorstore.query.nodes_visited` | Histogram | index_id | Graph search cost |
 | `vectorstore.storage.get.duration` | Histogram | cache_hit | Object-store GET latency; `cache_hit=true` on block-cache hits, `false` on ranged `GetObject` misses |
 | `vectorstore.storage.get.bytes` | Counter | direction | Bytes transferred against the object store (`direction=download`) |
-| `vectorstore.cache.block.hit` | Counter | | Block cache hits |
-| `vectorstore.cache.block.miss` | Counter | | Block cache misses |
+| `vectorstore.cache.hit` | Counter | `tier`, `cache_name` | Cache hits across every heap / off-heap / disk tier |
+| `vectorstore.cache.miss` | Counter | `tier`, `cache_name` | Cache misses across every tier |
+| `vectorstore.cache.eviction` | Counter | `tier`, `cache_name` | Entries evicted by the tier's bounding policy |
+| `vectorstore.cache.bytes.current` | Gauge | `tier`, `cache_name` | Bytes currently held by the tier |
+| `vectorstore.cache.entries.current` | Gauge | `tier`, `cache_name` | Entry count currently held by the tier |
 | `vectorstore.filter.compile.duration` | Histogram | index_id, term_count, result_ratio_bucket | Filter compilation cost; `result_ratio_bucket` is one of `0-25`, `25-50`, `50-75`, `75-100` |
 | `vectorstore.query.filtered_ratio` | DistributionSummary | index_id | Fraction of ordinals accepted per segment (scaled to 0–100) |
 

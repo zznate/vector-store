@@ -62,12 +62,16 @@ public class VectorStoreMeters {
         .baseUnit("bytes")
         .register(registry);
 
-    Counter.builder(MetricNames.CACHE_BLOCK_HIT)
-        .description("Block-cache hits")
+    Counter.builder(MetricNames.CACHE_HIT)
+        .description("Cache hits, tagged by tier and cache_name")
         .register(registry);
 
-    Counter.builder(MetricNames.CACHE_BLOCK_MISS)
-        .description("Block-cache misses")
+    Counter.builder(MetricNames.CACHE_MISS)
+        .description("Cache misses, tagged by tier and cache_name")
+        .register(registry);
+
+    Counter.builder(MetricNames.CACHE_EVICTION)
+        .description("Cache evictions, tagged by tier and cache_name")
         .register(registry);
 
     Timer.builder(MetricNames.FILTER_COMPILE_DURATION)

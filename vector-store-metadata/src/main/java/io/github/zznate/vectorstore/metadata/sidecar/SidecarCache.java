@@ -1,30 +1,30 @@
 package io.github.zznate.vectorstore.metadata.sidecar;
 
-import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.Caffeine;
+import io.github.zznate.vectorstore.core.cache.HeapCacheTier;
+import io.micrometer.core.instrument.MeterRegistry;
 
 /**
- * Process-wide cache of parsed sidecar objects. Byte-weighted eviction
- * (default 128 MiB) is enforced across every segment's sidecars; both
- * attributes and tombstones share the same LRU budget, so a workload that
- * touches many segments but only reads tombstones stays within the
- * configured heap ceiling.
+ * Process-wide cache of parsed sidecar objects. Thin façade over a
+ * {@link HeapCacheTier} so both attribute and tombstone sidecars share a
+ * single byte-weighted LRU budget while emitting the standard
+ * {@code vectorstore.cache.*} metrics tagged by
+ * {@code tier=l1_heap} and {@code cache_name=sidecar}.
  *
  * <p>Keys use {@link #attributesKey} / {@link #tombstonesKey} so two
- * kinds of sidecar from the same segment don't collide. The cache is
- * deliberately dumb; readers own hit / miss semantics and loading.
+ * kinds of sidecar from the same segment don't collide.
  */
 public final class SidecarCache {
 
-  private final Cache<String, CachedSidecar> cache;
+  public static final String CACHE_NAME = "sidecar";
 
-  public SidecarCache(long maxBytes) {
-    this.cache =
-        Caffeine.newBuilder()
-            .maximumWeight(maxBytes)
-            .weigher(
-                (String key, CachedSidecar value) ->
-                    (int) Math.min(Integer.MAX_VALUE, value.sizeBytes()))
+  private final HeapCacheTier<String, CachedSidecar> tier;
+
+  public SidecarCache(long maxBytes, MeterRegistry meterRegistry) {
+    this.tier =
+        HeapCacheTier.<String, CachedSidecar>builder(CACHE_NAME)
+            .byteWeighted(
+                maxBytes, value -> (int) Math.min(Integer.MAX_VALUE, value.sizeBytes()))
+            .meterRegistry(meterRegistry)
             .build();
   }
 
@@ -37,22 +37,27 @@ public final class SidecarCache {
   }
 
   public CachedSidecar getIfPresent(String key) {
-    return cache.getIfPresent(key);
+    return tier.get(key).orElse(null);
   }
 
   public void put(String key, CachedSidecar value) {
-    cache.put(key, value);
+    tier.put(key, value);
   }
 
   public void invalidate(String key) {
-    cache.invalidate(key);
+    tier.invalidate(key);
   }
 
   public void invalidateAll() {
-    cache.invalidateAll();
+    tier.invalidateAll();
   }
 
   public long estimatedSize() {
-    return cache.estimatedSize();
+    return tier.stats().currentEntries();
+  }
+
+  /** Access the underlying tier for stats reporting. */
+  public HeapCacheTier<String, CachedSidecar> tier() {
+    return tier;
   }
 }

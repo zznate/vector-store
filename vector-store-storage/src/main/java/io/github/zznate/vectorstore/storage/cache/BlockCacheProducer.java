@@ -1,6 +1,7 @@
 package io.github.zznate.vectorstore.storage.cache;
 
 import io.github.zznate.vectorstore.storage.config.StorageConfig;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Produces;
 import jakarta.inject.Singleton;
@@ -18,12 +19,12 @@ public class BlockCacheProducer {
 
   @Produces
   @Singleton
-  public BlockCache blockCache(StorageConfig config) {
+  public BlockCache blockCache(StorageConfig config, MeterRegistry meterRegistry) {
     long bytes = config.blockCache().bytes();
     int blockSize = config.blockCache().blockSize();
     if (LOG.isInfoEnabled()) {
       LOG.info("Initialising block cache budget={} bytes blockSize={} bytes", bytes, blockSize);
     }
-    return new BlockCache(bytes);
+    return new BlockCache(bytes, meterRegistry);
   }
 }
