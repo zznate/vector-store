@@ -10,6 +10,7 @@ import io.github.zznate.vectorstore.core.segment.BuiltSegment;
 import io.github.zznate.vectorstore.engine.buffer.BufferEntry;
 import io.github.zznate.vectorstore.engine.buffer.BufferSnapshot;
 import io.github.zznate.vectorstore.engine.build.SegmentBuilder;
+import io.github.zznate.vectorstore.engine.search.SegmentHandleCache;
 import io.github.zznate.vectorstore.engine.search.SegmentSearcher;
 import io.github.zznate.vectorstore.engine.store.LocalSegmentStore;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -41,6 +42,7 @@ public final class EngineTestHarness implements AutoCloseable {
 
   public final Path root;
   public final LocalSegmentStore store;
+  public final SegmentHandleCache handles;
   public final StubVectorIndexRepository indexes = new StubVectorIndexRepository();
   public final SegmentBuilder builder;
   public final SegmentSearcher searcher;
@@ -48,8 +50,9 @@ public final class EngineTestHarness implements AutoCloseable {
   private EngineTestHarness(Path root) {
     this.root = root;
     this.store = new LocalSegmentStore(root);
+    this.handles = new SegmentHandleCache(store, tracer, meterRegistry);
     this.builder = new SegmentBuilder(clock, tracer, meterRegistry);
-    this.searcher = new SegmentSearcher(store, indexes, tracer, meterRegistry);
+    this.searcher = new SegmentSearcher(handles, indexes, tracer, meterRegistry);
   }
 
   public static EngineTestHarness create() throws IOException {
@@ -97,6 +100,7 @@ public final class EngineTestHarness implements AutoCloseable {
 
   @Override
   public void close() throws IOException {
+    handles.invalidateAll();
     store.close();
     deleteRecursively(root);
   }

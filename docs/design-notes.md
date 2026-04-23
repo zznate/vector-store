@@ -236,6 +236,7 @@ Quarkus auto-instruments HTTP, JDBI, and the Micrometer pipeline. Manual spans (
 - `vectorstore.query.fanout` — parent span for per-segment fan-out
 - `vectorstore.query.segment.search` — per-segment search, one child per active segment
 - `vectorstore.storage.range_get` — ranged object GET, one per block-cache miss
+- `vectorstore.cache.segment_handle.load` — cold-path load of a segment handle (opens graph, parses ordinals); attributes: `segment_id`, `index_id`
 - `vectorstore.filter.compile` — filter predicate → Bits mask; attributes: `segment_id`, `index_id`, `term_count`, `vector_count`, `accepted_count`
 
 Span attributes: `index_id`, `segment_id`, `top_k`, `vector_count`, `cache_hit`. Never raw vectors or user attributes.

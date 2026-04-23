@@ -47,12 +47,22 @@ Organised under `io.github.zznate.vectorstore.engine`:
 - [`search/`](src/main/java/io/github/zznate/vectorstore/engine/search) —
   the query path.
   - `Searcher` interface + `SegmentSearcher` impl (`@ApplicationScoped`).
-    Loads each segment's `ordinals.jsonl` lazily and caches the
-    ordinal→userId map in a `String[]` per segment.
+    Opens each segment's on-disk graph once through
+    `SegmentHandleCache` and runs a fresh `OnDiskGraphIndex.View` per
+    query over the shared handle.
+  - `SegmentHandle` record bundling the loaded JVector graph and the
+    parsed ordinal→user-id array.
+  - `SegmentHandleCache` (`@ApplicationScoped`). Bounded LRU
+    (default 256 handles, count-weighted) built on `HeapCacheTier`. On
+    miss it single-flights the load under a per-segment lock and
+    records the `vectorstore.cache.segment_handle.load` span; on
+    eviction it closes the underlying `OnDiskGraphIndex` so native
+    resources are released.
   - `QueryCoordinator` (`@ApplicationScoped`). Resolves the active
-    manifest, fans out across every segment, merges the per-segment
-    hits into top-k via a bounded heap. The fan-out is not conditional
-    on segment count — the code path is identical at N=1 and N=100.
+    manifest through `ManifestCache`, fans out across every segment,
+    merges the per-segment hits into top-k via a bounded heap. The
+    fan-out is not conditional on segment count — the code path is
+    identical at N=1 and N=100.
   - `ScoredOrdinal` record — one hit: graph ordinal, user ID, score.
 - [`tombstone/`](src/main/java/io/github/zznate/vectorstore/engine/tombstone) —
   per-index staging set for uncommitted deletes.
@@ -114,8 +124,8 @@ attempt.
 `QueryCoordinator.query(indexId, vector, topK)`:
 
 1. Open span `vectorstore.query.fanout`.
-2. `ManifestResolver.activeSegments(indexId)` — may return empty (valid
-   state for an index with no commits; returns empty hits).
+2. `ManifestCache.activeSegments(indexId)` — cache-first, backed by
+   `ManifestResolver`. Returns empty for an index with no commits.
 3. Staged tombstone snapshot — `CatalogStagedTombstones.tombstonedIds(indexId)`
    (catalog read; survives restart).
 4. For each active segment: `Searcher.buildAcceptMask` (excludes

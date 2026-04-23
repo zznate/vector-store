@@ -11,7 +11,11 @@ import io.micrometer.core.instrument.Tags;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
+import java.util.function.BiConsumer;
+import java.util.function.Predicate;
 import java.util.function.ToIntFunction;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Caffeine-backed on-heap implementation of {@link CacheTier}. Supports
@@ -21,6 +25,8 @@ import java.util.function.ToIntFunction;
  * heap cache in the service.
  */
 public final class HeapCacheTier<K, V> implements CacheTier<K, V> {
+
+  private static final Logger LOG = LoggerFactory.getLogger(HeapCacheTier.class);
 
   public static final String TIER_TAG = "tier";
   public static final String CACHE_NAME_TAG = "cache_name";
@@ -81,6 +87,7 @@ public final class HeapCacheTier<K, V> implements CacheTier<K, V> {
       c.maximumSize(b.maxEntries);
     }
     Counter localEviction = this.evictionCounter;
+    BiConsumer<K, V> userRemovalHook = b.removalHook;
     c.removalListener(
         (K key, V value, RemovalCause cause) -> {
           if (value != null && weigher != null) {
@@ -90,6 +97,22 @@ public final class HeapCacheTier<K, V> implements CacheTier<K, V> {
             evictions.increment();
             if (localEviction != null) {
               localEviction.increment();
+            }
+          }
+          if (userRemovalHook != null && value != null) {
+            try {
+              userRemovalHook.accept(key, value);
+            } catch (RuntimeException e) {
+              // Hook is best-effort; a failing cleanup must not cascade
+              // into cache corruption. Log the failure so the operator
+              // sees the stack trace even though we recover.
+              if (LOG.isWarnEnabled()) {
+                LOG.warn(
+                    "cache \"{}\" removal hook failed for key {}",
+                    cacheName,
+                    key,
+                    e);
+              }
             }
           }
         });
@@ -144,6 +167,15 @@ public final class HeapCacheTier<K, V> implements CacheTier<K, V> {
     cache.invalidateAll();
   }
 
+  /**
+   * Remove every entry whose key matches {@code keyPredicate}. The
+   * removal listener fires for each matched entry, so byte accounting
+   * and any user-supplied cleanup hook run normally.
+   */
+  public void removeIf(Predicate<K> keyPredicate) {
+    cache.asMap().keySet().removeIf(keyPredicate);
+  }
+
   @Override
   public CacheTierStats stats() {
     return new CacheTierStats(
@@ -170,6 +202,7 @@ public final class HeapCacheTier<K, V> implements CacheTier<K, V> {
     private long maxEntries;
     private ToIntFunction<V> weigher;
     private MeterRegistry meterRegistry;
+    private BiConsumer<K, V> removalHook;
 
     private Builder(String cacheName) {
       this.cacheName = cacheName;
@@ -191,6 +224,17 @@ public final class HeapCacheTier<K, V> implements CacheTier<K, V> {
 
     public Builder<K, V> meterRegistry(MeterRegistry meterRegistry) {
       this.meterRegistry = meterRegistry;
+      return this;
+    }
+
+    /**
+     * Invoked by the cache when an entry leaves — evicted, invalidated, or
+     * replaced. Useful for closing resources held by the value (file
+     * handles, native memory). Exceptions thrown by the hook are
+     * swallowed; the hook is expected to self-log.
+     */
+    public Builder<K, V> onRemoval(BiConsumer<K, V> hook) {
+      this.removalHook = hook;
       return this;
     }
 

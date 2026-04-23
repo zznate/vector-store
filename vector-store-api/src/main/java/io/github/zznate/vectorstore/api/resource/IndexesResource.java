@@ -8,6 +8,7 @@ import io.github.zznate.vectorstore.api.dto.IndexResponse;
 import io.github.zznate.vectorstore.api.error.BucketNotFoundException;
 import io.github.zznate.vectorstore.api.error.IndexAlreadyExistsException;
 import io.github.zznate.vectorstore.api.error.IndexNotFoundException;
+import io.github.zznate.vectorstore.core.catalog.manifest.ManifestCache;
 import io.github.zznate.vectorstore.core.catalog.model.VectorIndex;
 import io.github.zznate.vectorstore.core.catalog.repository.BucketRepository;
 import io.github.zznate.vectorstore.core.catalog.repository.VectorIndexRepository;
@@ -40,6 +41,7 @@ public class IndexesResource {
 
   private final BucketRepository buckets;
   private final VectorIndexRepository indexes;
+  private final ManifestCache manifests;
   private final Clock clock;
   private final ObjectMapper objectMapper;
 
@@ -47,10 +49,12 @@ public class IndexesResource {
   public IndexesResource(
       BucketRepository buckets,
       VectorIndexRepository indexes,
+      ManifestCache manifests,
       Clock clock,
       ObjectMapper objectMapper) {
     this.buckets = buckets;
     this.indexes = indexes;
+    this.manifests = manifests;
     this.clock = clock;
     this.objectMapper = objectMapper;
   }
@@ -108,6 +112,7 @@ public class IndexesResource {
       throw new IndexNotFoundException(qualifiedId);
     }
     indexes.delete(qualifiedId);
+    manifests.invalidateIndex(qualifiedId);
     return Response.noContent().build();
   }
 

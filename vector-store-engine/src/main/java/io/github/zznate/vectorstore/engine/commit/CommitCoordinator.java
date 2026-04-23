@@ -3,7 +3,7 @@ package io.github.zznate.vectorstore.engine.commit;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.zznate.vectorstore.core.catalog.jdbi.CatalogCommitPublisher;
-import io.github.zznate.vectorstore.core.catalog.manifest.ManifestResolver;
+import io.github.zznate.vectorstore.core.catalog.manifest.ManifestCache;
 import io.github.zznate.vectorstore.core.catalog.model.IndexBuildParams;
 import io.github.zznate.vectorstore.core.catalog.model.ManifestVersion;
 import io.github.zznate.vectorstore.core.catalog.model.Segment;
@@ -74,7 +74,7 @@ public class CommitCoordinator {
   private final SegmentBuilder builder;
   private final SegmentStore segmentStore;
   private final SegmentRepository segments;
-  private final ManifestResolver manifestResolver;
+  private final ManifestCache manifests;
   private final CatalogCommitPublisher commitPublisher;
   private final CatalogStagedTombstones tombstones;
   private final Searcher searcher;
@@ -90,7 +90,7 @@ public class CommitCoordinator {
       SegmentBuilder builder,
       SegmentStore segmentStore,
       SegmentRepository segments,
-      ManifestResolver manifestResolver,
+      ManifestCache manifests,
       CatalogCommitPublisher commitPublisher,
       CatalogStagedTombstones tombstones,
       Searcher searcher,
@@ -101,7 +101,7 @@ public class CommitCoordinator {
     this.builder = builder;
     this.segmentStore = segmentStore;
     this.segments = segments;
-    this.manifestResolver = manifestResolver;
+    this.manifests = manifests;
     this.commitPublisher = commitPublisher;
     this.tombstones = tombstones;
     this.searcher = searcher;
@@ -136,10 +136,30 @@ public class CommitCoordinator {
       throw new EmptyCommitException(index.indexId());
     }
 
-    IndexBuildParams params = IndexBuildParams.fromJson(index.engineParams());
     String segmentId = SegmentIds.newSegmentId();
     String objectPrefix = objectPrefixFor(index, segmentId);
 
+    BuiltSegment built = buildAndPublishSegment(index, snapshot, segmentId, objectPrefix);
+
+    Set<String> staged = tombstones.snapshot(index.indexId());
+    List<Segment> willBeActive = computeWillBeActive(index.indexId(), segmentId, objectPrefix, built);
+
+    applyStagedTombstonesAcross(willBeActive, staged, segmentId);
+
+    return finalizePublish(index, segmentId, built, willBeActive, staged);
+  }
+
+  /**
+   * Create the BUILDING catalog row, build the graph on disk, and publish
+   * the segment artefacts to the object store. Each phase's failure is
+   * tagged on {@code vectorstore.commit.failures} and the segment row is
+   * retired in {@link #failed}. Package-private so individual phases can
+   * be exercised directly from tests.
+   */
+  BuiltSegment buildAndPublishSegment(
+      VectorIndex index, BufferSnapshot snapshot, String segmentId, String objectPrefix)
+      throws CommitFailedException {
+    IndexBuildParams params = IndexBuildParams.fromJson(index.engineParams());
     segments.create(
         new Segment(
             segmentId,
@@ -164,19 +184,22 @@ public class CommitCoordinator {
       failed(segmentId, PHASE_PUBLISH, e);
       throw new CommitFailedException(PHASE_PUBLISH, e);
     }
+    return built;
+  }
 
-    // Snapshot the staging set and fan the tombstones into every sidecar
-    // that will be active after the commit — the new segment (still
-    // BUILDING in the catalog, but already present on object storage) and
-    // every previously-ACTIVE segment. Sidecar updates are idempotent
-    // bitmap unions, so a subsequent transactional failure is safe to
-    // retry.
-    Set<String> staged = tombstones.snapshot(index.indexId());
-    List<Segment> previousActive = manifestResolver.activeSegments(index.indexId());
+  /**
+   * Compute the full list of segments that will be active after this
+   * commit: every previously-ACTIVE segment plus a synthetic
+   * {@link Segment} record for the just-built one (already on the object
+   * store but still BUILDING in the catalog).
+   */
+  List<Segment> computeWillBeActive(
+      String indexId, String newSegmentId, String objectPrefix, BuiltSegment built) {
+    List<Segment> previousActive = manifests.activeSegments(indexId);
     Segment newSegment =
         new Segment(
-            segmentId,
-            index.indexId(),
+            newSegmentId,
+            indexId,
             SegmentState.ACTIVE,
             built.vectorCount(),
             built.bytes(),
@@ -185,21 +208,49 @@ public class CommitCoordinator {
     List<Segment> willBeActive = new ArrayList<>(previousActive.size() + 1);
     willBeActive.addAll(previousActive);
     willBeActive.add(newSegment);
+    return willBeActive;
+  }
 
-    if (!staged.isEmpty()) {
-      try {
-        for (Segment segment : willBeActive) {
-          applyStagedTombstones(segment, staged);
-        }
-      } catch (IOException e) {
-        failed(segmentId, PHASE_TOMBSTONES, e);
-        throw new CommitFailedException(PHASE_TOMBSTONES, e);
-      }
+  /**
+   * Apply the staged tombstones to every segment that will be active
+   * after the commit. Sidecar updates are idempotent bitmap unions, so a
+   * subsequent transactional failure is safe to retry. A failure here is
+   * tagged as {@code phase=tombstones}; {@code failureSegmentId} is the
+   * just-built segment whose row is retired by {@link #failed}.
+   */
+  void applyStagedTombstonesAcross(
+      List<Segment> willBeActive, Set<String> staged, String failureSegmentId)
+      throws CommitFailedException {
+    if (staged.isEmpty()) {
+      return;
     }
+    try {
+      for (Segment segment : willBeActive) {
+        applyStagedTombstones(segment, staged);
+      }
+    } catch (IOException e) {
+      failed(failureSegmentId, PHASE_TOMBSTONES, e);
+      throw new CommitFailedException(PHASE_TOMBSTONES, e);
+    }
+  }
 
+  /**
+   * Atomic catalog step: flip the new segment to ACTIVE, append the
+   * manifest version, and clear the staged tombstone rows — all in one
+   * JDBI transaction via {@link io.github.zznate.vectorstore.core.catalog.jdbi.CatalogCommitPublisher}.
+   * Also records the unstaged counter and warms the manifest cache with
+   * the new version.
+   */
+  CommitOutcome finalizePublish(
+      VectorIndex index,
+      String segmentId,
+      BuiltSegment built,
+      List<Segment> willBeActive,
+      Set<String> staged)
+      throws CommitFailedException {
     int nextVersion;
     try {
-      nextVersion = manifestResolver.currentVersion(index.indexId()).orElse(0) + 1;
+      nextVersion = manifests.currentVersion(index.indexId()).orElse(0) + 1;
       List<String> segmentIds = new ArrayList<>(willBeActive.size());
       for (Segment segment : willBeActive) {
         segmentIds.add(segment.segmentId());
@@ -213,6 +264,7 @@ public class CommitCoordinator {
           index.indexId(),
           staged);
       tombstones.recordUnstaged(index.indexId(), staged.size());
+      manifests.populate(index.indexId(), nextVersion, willBeActive);
     } catch (JsonProcessingException | RuntimeException e) {
       failed(segmentId, PHASE_CATALOG, e);
       throw new CommitFailedException(PHASE_CATALOG, e);
@@ -261,8 +313,18 @@ public class CommitCoordinator {
   private void failed(String segmentId, String phase, Throwable cause) {
     try {
       segments.updateState(segmentId, SegmentState.RETIRED);
-    } catch (RuntimeException ignore) {
-      // Best-effort — do not swallow the original failure with a catalog error.
+    } catch (RuntimeException e) {
+      // Best-effort — the original failure ({@code cause}) is the signal
+      // we want to surface, so we don't rethrow here, but we log the
+      // secondary catalog failure with its stack trace so operators can
+      // see it.
+      if (LOG.isWarnEnabled()) {
+        LOG.warn(
+            "failed to retire segment {} after phase={} failure (original cause logged separately)",
+            segmentId,
+            phase,
+            e);
+      }
     }
     Counter.builder("vectorstore.commit.failures")
         .description("Count of commit failures, tagged by phase")

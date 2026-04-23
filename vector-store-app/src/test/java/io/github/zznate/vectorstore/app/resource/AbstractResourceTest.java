@@ -1,8 +1,10 @@
 package io.github.zznate.vectorstore.app.resource;
 
 import io.github.zznate.vectorstore.api.auth.PasswordHasher;
+import io.github.zznate.vectorstore.core.catalog.manifest.ManifestCache;
 import io.github.zznate.vectorstore.core.catalog.model.ApiKey;
 import io.github.zznate.vectorstore.core.catalog.repository.ApiKeyRepository;
+import io.github.zznate.vectorstore.engine.search.SegmentHandleCache;
 import io.restassured.RestAssured;
 import jakarta.inject.Inject;
 import java.time.Clock;
@@ -30,6 +32,8 @@ public abstract class AbstractResourceTest {
   @Inject protected ApiKeyRepository apiKeys;
   @Inject protected PasswordHasher hasher;
   @Inject protected Clock clock;
+  @Inject protected ManifestCache manifestCache;
+  @Inject protected SegmentHandleCache segmentHandleCache;
 
   @BeforeAll
   static void disableRestAssuredUrlEncoding() {
@@ -53,6 +57,10 @@ public abstract class AbstractResourceTest {
           h.execute("DELETE FROM vector_bucket");
           h.execute("DELETE FROM api_key");
         });
+    // Drop in-memory caches that mirror the catalog so one test's
+    // committed state cannot serve stale results to the next.
+    manifestCache.invalidateAll();
+    segmentHandleCache.invalidateAll();
     apiKeys.create(
         new ApiKey("admin-test", hasher.hash("admin-secret"), null, clock.instant(), null));
     apiKeys.create(

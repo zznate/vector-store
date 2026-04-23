@@ -1,7 +1,7 @@
 package io.github.zznate.vectorstore.engine.search;
 
 import io.github.jbellis.jvector.util.Bits;
-import io.github.zznate.vectorstore.core.catalog.manifest.ManifestResolver;
+import io.github.zznate.vectorstore.core.catalog.manifest.ManifestCache;
 import io.github.zznate.vectorstore.core.catalog.model.Segment;
 import io.github.zznate.vectorstore.engine.tombstone.CatalogStagedTombstones;
 import io.github.zznate.vectorstore.metadata.filter.FilterCompiler;
@@ -50,7 +50,7 @@ import org.roaringbitmap.RoaringBitmap;
 @ApplicationScoped
 public class QueryCoordinator {
 
-  private final ManifestResolver manifests;
+  private final ManifestCache manifests;
   private final Searcher searcher;
   private final CatalogStagedTombstones tombstones;
   private final SidecarLoader sidecarLoader;
@@ -60,7 +60,7 @@ public class QueryCoordinator {
 
   @Inject
   public QueryCoordinator(
-      ManifestResolver manifests,
+      ManifestCache manifests,
       Searcher searcher,
       CatalogStagedTombstones tombstones,
       SidecarLoader sidecarLoader,

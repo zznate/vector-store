@@ -7,7 +7,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import io.github.zznate.vectorstore.core.catalog.manifest.ManifestResolver;
+import io.github.zznate.vectorstore.core.catalog.manifest.ManifestCache;
 import io.github.zznate.vectorstore.core.catalog.model.Segment;
 import io.github.zznate.vectorstore.core.catalog.model.SegmentState;
 import io.github.zznate.vectorstore.core.catalog.repository.StagedTombstoneRepository;
@@ -48,7 +48,7 @@ class QueryCoordinatorMergeTest {
 
   @Test
   void topKInterleavesSegmentsByScore() {
-    ManifestResolver resolver = mock(ManifestResolver.class);
+    ManifestCache resolver = mock(ManifestCache.class);
     when(resolver.activeSegments(INDEX_ID)).thenReturn(List.of(segA, segB));
 
     Searcher searcher = mock(Searcher.class);
@@ -75,7 +75,7 @@ class QueryCoordinatorMergeTest {
 
   @Test
   void mergeHonoursSegmentCountOfOne() {
-    ManifestResolver resolver = mock(ManifestResolver.class);
+    ManifestCache resolver = mock(ManifestCache.class);
     when(resolver.activeSegments(INDEX_ID)).thenReturn(List.of(segA));
 
     Searcher searcher = mock(Searcher.class);
@@ -95,7 +95,7 @@ class QueryCoordinatorMergeTest {
 
   @Test
   void zeroActiveSegmentsReturnsEmptyHits() {
-    ManifestResolver resolver = mock(ManifestResolver.class);
+    ManifestCache resolver = mock(ManifestCache.class);
     when(resolver.activeSegments(INDEX_ID)).thenReturn(List.of());
 
     QueryCoordinator coordinator = newCoordinator(mock(Searcher.class), resolver);
@@ -103,7 +103,7 @@ class QueryCoordinatorMergeTest {
     assertThat(coordinator.query(INDEX_ID, QUERY, 5, null)).isEmpty();
   }
 
-  private QueryCoordinator newCoordinator(Searcher searcher, ManifestResolver resolver) {
+  private QueryCoordinator newCoordinator(Searcher searcher, ManifestCache resolver) {
     SidecarLoader loader = mock(SidecarLoader.class);
     // All segments report empty tombstones and empty attributes so the
     // coordinator short-circuits to Bits.ALL and enriches hits with an

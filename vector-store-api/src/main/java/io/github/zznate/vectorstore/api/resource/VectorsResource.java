@@ -12,7 +12,7 @@ import io.github.zznate.vectorstore.api.dto.VectorLookupResponse;
 import io.github.zznate.vectorstore.api.error.DimensionMismatchException;
 import io.github.zznate.vectorstore.api.error.IndexNotFoundException;
 import io.github.zznate.vectorstore.api.error.UnsupportedFilterOperatorHttpException;
-import io.github.zznate.vectorstore.core.catalog.manifest.ManifestResolver;
+import io.github.zznate.vectorstore.core.catalog.manifest.ManifestCache;
 import io.github.zznate.vectorstore.core.catalog.model.Segment;
 import io.github.zznate.vectorstore.core.catalog.model.VectorIndex;
 import io.github.zznate.vectorstore.core.catalog.repository.VectorIndexRepository;
@@ -56,7 +56,7 @@ public class VectorsResource {
   private final QueryCoordinator queryCoordinator;
   private final Searcher searcher;
   private final CatalogStagedTombstones tombstones;
-  private final ManifestResolver manifestResolver;
+  private final ManifestCache manifests;
   private final SidecarLoader sidecarLoader;
 
   @Inject
@@ -66,14 +66,14 @@ public class VectorsResource {
       QueryCoordinator queryCoordinator,
       Searcher searcher,
       CatalogStagedTombstones tombstones,
-      ManifestResolver manifestResolver,
+      ManifestCache manifests,
       SidecarLoader sidecarLoader) {
     this.indexes = indexes;
     this.writeBuffer = writeBuffer;
     this.queryCoordinator = queryCoordinator;
     this.searcher = searcher;
     this.tombstones = tombstones;
-    this.manifestResolver = manifestResolver;
+    this.manifests = manifests;
     this.sidecarLoader = sidecarLoader;
   }
 
@@ -151,7 +151,7 @@ public class VectorsResource {
     if (tombstones.isTombstoned(index.indexId(), id)) {
       return new VectorLookupResponse(id, false, Map.of());
     }
-    for (Segment segment : manifestResolver.activeSegments(index.indexId())) {
+    for (Segment segment : manifests.activeSegments(index.indexId())) {
       int ordinal = searcher.findOrdinal(segment, id);
       if (ordinal < 0) {
         continue;
@@ -175,7 +175,7 @@ public class VectorsResource {
   public StatsResponse stats(
       @PathParam("bucket") String bucketId, @PathParam("index") String indexId) {
     VectorIndex index = requireIndex(bucketId, indexId);
-    List<Segment> active = manifestResolver.activeSegments(index.indexId());
+    List<Segment> active = manifests.activeSegments(index.indexId());
     long vectorCount = active.stream().mapToLong(Segment::vectorCount).sum();
     long totalBytes = active.stream().mapToLong(Segment::bytes).sum();
     int pending = writeBuffer.size(index.indexId());
