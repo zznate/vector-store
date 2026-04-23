@@ -21,7 +21,7 @@ import io.github.zznate.vectorstore.engine.buffer.WriteBuffer;
 import io.github.zznate.vectorstore.engine.search.QueryCoordinator;
 import io.github.zznate.vectorstore.engine.search.ScoredHit;
 import io.github.zznate.vectorstore.engine.search.Searcher;
-import io.github.zznate.vectorstore.engine.tombstone.InMemoryTombstones;
+import io.github.zznate.vectorstore.engine.tombstone.CatalogStagedTombstones;
 import io.github.zznate.vectorstore.metadata.filter.FilterExpr;
 import io.github.zznate.vectorstore.metadata.filter.FilterParser;
 import io.github.zznate.vectorstore.metadata.filter.UnsupportedFilterOperatorException;
@@ -55,7 +55,7 @@ public class VectorsResource {
   private final WriteBuffer writeBuffer;
   private final QueryCoordinator queryCoordinator;
   private final Searcher searcher;
-  private final InMemoryTombstones tombstones;
+  private final CatalogStagedTombstones tombstones;
   private final ManifestResolver manifestResolver;
   private final SidecarLoader sidecarLoader;
 
@@ -65,7 +65,7 @@ public class VectorsResource {
       WriteBuffer writeBuffer,
       QueryCoordinator queryCoordinator,
       Searcher searcher,
-      InMemoryTombstones tombstones,
+      CatalogStagedTombstones tombstones,
       ManifestResolver manifestResolver,
       SidecarLoader sidecarLoader) {
     this.indexes = indexes;

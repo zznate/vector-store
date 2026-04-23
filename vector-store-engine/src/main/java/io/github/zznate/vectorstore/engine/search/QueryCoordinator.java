@@ -3,7 +3,7 @@ package io.github.zznate.vectorstore.engine.search;
 import io.github.jbellis.jvector.util.Bits;
 import io.github.zznate.vectorstore.core.catalog.manifest.ManifestResolver;
 import io.github.zznate.vectorstore.core.catalog.model.Segment;
-import io.github.zznate.vectorstore.engine.tombstone.InMemoryTombstones;
+import io.github.zznate.vectorstore.engine.tombstone.CatalogStagedTombstones;
 import io.github.zznate.vectorstore.metadata.filter.FilterCompiler;
 import io.github.zznate.vectorstore.metadata.filter.FilterExpr;
 import io.github.zznate.vectorstore.metadata.filter.RoaringBitsAdapter;
@@ -52,7 +52,7 @@ public class QueryCoordinator {
 
   private final ManifestResolver manifests;
   private final Searcher searcher;
-  private final InMemoryTombstones tombstones;
+  private final CatalogStagedTombstones tombstones;
   private final SidecarLoader sidecarLoader;
   private final FilterCompiler filterCompiler;
   private final Tracer tracer;
@@ -62,7 +62,7 @@ public class QueryCoordinator {
   public QueryCoordinator(
       ManifestResolver manifests,
       Searcher searcher,
-      InMemoryTombstones tombstones,
+      CatalogStagedTombstones tombstones,
       SidecarLoader sidecarLoader,
       FilterCompiler filterCompiler,
       Tracer tracer,

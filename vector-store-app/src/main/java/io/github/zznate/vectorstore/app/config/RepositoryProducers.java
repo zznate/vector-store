@@ -2,13 +2,16 @@ package io.github.zznate.vectorstore.app.config;
 
 import io.github.zznate.vectorstore.core.catalog.jdbi.ApiKeyRepositoryJdbi;
 import io.github.zznate.vectorstore.core.catalog.jdbi.BucketRepositoryJdbi;
+import io.github.zznate.vectorstore.core.catalog.jdbi.CatalogCommitPublisher;
 import io.github.zznate.vectorstore.core.catalog.jdbi.ManifestVersionRepositoryJdbi;
 import io.github.zznate.vectorstore.core.catalog.jdbi.SegmentRepositoryJdbi;
+import io.github.zznate.vectorstore.core.catalog.jdbi.StagedTombstoneRepositoryJdbi;
 import io.github.zznate.vectorstore.core.catalog.jdbi.VectorIndexRepositoryJdbi;
 import io.github.zznate.vectorstore.core.catalog.repository.ApiKeyRepository;
 import io.github.zznate.vectorstore.core.catalog.repository.BucketRepository;
 import io.github.zznate.vectorstore.core.catalog.repository.ManifestVersionRepository;
 import io.github.zznate.vectorstore.core.catalog.repository.SegmentRepository;
+import io.github.zznate.vectorstore.core.catalog.repository.StagedTombstoneRepository;
 import io.github.zznate.vectorstore.core.catalog.repository.VectorIndexRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Produces;
@@ -51,5 +54,17 @@ public class RepositoryProducers {
   @Singleton
   public ApiKeyRepository apiKeyRepository(Jdbi jdbi) {
     return new ApiKeyRepositoryJdbi(jdbi);
+  }
+
+  @Produces
+  @Singleton
+  public StagedTombstoneRepository stagedTombstoneRepository(Jdbi jdbi) {
+    return new StagedTombstoneRepositoryJdbi(jdbi);
+  }
+
+  @Produces
+  @Singleton
+  public CatalogCommitPublisher catalogCommitPublisher(Jdbi jdbi) {
+    return new CatalogCommitPublisher(jdbi);
   }
 }

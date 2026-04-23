@@ -10,7 +10,8 @@ import static org.mockito.Mockito.when;
 import io.github.zznate.vectorstore.core.catalog.manifest.ManifestResolver;
 import io.github.zznate.vectorstore.core.catalog.model.Segment;
 import io.github.zznate.vectorstore.core.catalog.model.SegmentState;
-import io.github.zznate.vectorstore.engine.tombstone.InMemoryTombstones;
+import io.github.zznate.vectorstore.core.catalog.repository.StagedTombstoneRepository;
+import io.github.zznate.vectorstore.engine.tombstone.CatalogStagedTombstones;
 import io.github.zznate.vectorstore.metadata.filter.FilterCompiler;
 import io.github.zznate.vectorstore.metadata.sidecar.AttributeSidecar;
 import io.github.zznate.vectorstore.metadata.sidecar.SidecarLoader;
@@ -19,9 +20,12 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.api.trace.Tracer;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -112,13 +116,12 @@ class QueryCoordinatorMergeTest {
     Tracer tracer = OpenTelemetry.noop().getTracer("test");
     FilterCompiler compiler = new FilterCompiler(registry, tracer);
 
+    StagedTombstoneRepository stagedRepo = mock(StagedTombstoneRepository.class);
+    when(stagedRepo.snapshot(any(String.class))).thenReturn(Set.of());
+    CatalogStagedTombstones tombstones =
+        new CatalogStagedTombstones(stagedRepo, Clock.fixed(Instant.EPOCH, ZoneOffset.UTC), registry);
+
     return new QueryCoordinator(
-        resolver,
-        searcher,
-        new InMemoryTombstones(),
-        loader,
-        compiler,
-        tracer,
-        registry);
+        resolver, searcher, tombstones, loader, compiler, tracer, registry);
   }
 }

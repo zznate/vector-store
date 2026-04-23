@@ -20,12 +20,11 @@ import org.roaringbitmap.RoaringBitmap;
 
 /**
  * Exercises the per-segment tombstone merge invariants that
- * {@link CommitCoordinator#persistStagedTombstones} relies on: resolving
- * staged user IDs to ordinals via the cached ordinal map, unioning with
- * the existing persisted bitmap, and re-uploading. Bypasses
- * CommitCoordinator itself (that needs the full catalog wiring) and
- * drives the seams the app-level integration tests would cover in
- * Batch E.
+ * {@link CommitCoordinator}'s {@code applyStagedTombstones} helper relies
+ * on: resolving staged user IDs to ordinals via the cached ordinal map,
+ * unioning with the existing persisted bitmap, and re-uploading. Bypasses
+ * CommitCoordinator itself (which needs the full catalog wiring) and
+ * drives the seams the app-level integration tests cover end-to-end.
  */
 class TombstoneMergeTest {
 

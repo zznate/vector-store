@@ -6,7 +6,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import io.github.zznate.vectorstore.api.auth.ApiKeyAuthenticationFilter;
 import io.github.zznate.vectorstore.app.resource.AbstractResourceTest;
 import io.github.zznate.vectorstore.app.testresource.MinioTestResource;
-import io.github.zznate.vectorstore.engine.tombstone.InMemoryTombstones;
+import io.github.zznate.vectorstore.engine.tombstone.CatalogStagedTombstones;
 import io.github.zznate.vectorstore.metadata.sidecar.TombstoneSidecar;
 import io.github.zznate.vectorstore.storage.config.StorageConfig;
 import io.quarkus.test.common.QuarkusTestResource;
@@ -39,7 +39,7 @@ class FilterAndTombstoneIT extends AbstractResourceTest {
   private static final String BUCKET = DEMO_BUCKET;
   private static final int DIM = 32;
 
-  @Inject InMemoryTombstones tombstones;
+  @Inject CatalogStagedTombstones tombstones;
   @Inject S3Client s3Client;
   @Inject StorageConfig storageConfig;
 

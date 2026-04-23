@@ -2,6 +2,7 @@ package io.github.zznate.vectorstore.engine.commit;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.zznate.vectorstore.core.catalog.jdbi.CatalogCommitPublisher;
 import io.github.zznate.vectorstore.core.catalog.manifest.ManifestResolver;
 import io.github.zznate.vectorstore.core.catalog.model.IndexBuildParams;
 import io.github.zznate.vectorstore.core.catalog.model.ManifestVersion;
@@ -9,7 +10,6 @@ import io.github.zznate.vectorstore.core.catalog.model.Segment;
 import io.github.zznate.vectorstore.core.catalog.model.SegmentIds;
 import io.github.zznate.vectorstore.core.catalog.model.SegmentState;
 import io.github.zznate.vectorstore.core.catalog.model.VectorIndex;
-import io.github.zznate.vectorstore.core.catalog.repository.ManifestVersionRepository;
 import io.github.zznate.vectorstore.core.catalog.repository.SegmentRepository;
 import io.github.zznate.vectorstore.core.segment.BuiltSegment;
 import io.github.zznate.vectorstore.core.segment.SegmentStore;
@@ -17,7 +17,7 @@ import io.github.zznate.vectorstore.engine.buffer.BufferSnapshot;
 import io.github.zznate.vectorstore.engine.buffer.WriteBuffer;
 import io.github.zznate.vectorstore.engine.build.SegmentBuilder;
 import io.github.zznate.vectorstore.engine.search.Searcher;
-import io.github.zznate.vectorstore.engine.tombstone.InMemoryTombstones;
+import io.github.zznate.vectorstore.engine.tombstone.CatalogStagedTombstones;
 import io.github.zznate.vectorstore.metadata.sidecar.SidecarLoader;
 import io.github.zznate.vectorstore.metadata.sidecar.TombstoneSidecar;
 import io.micrometer.core.instrument.Counter;
@@ -38,14 +38,21 @@ import org.slf4j.LoggerFactory;
 
 /**
  * Orchestrates a single commit for one index: buffer snapshot → BUILDING
- * catalog row → build on disk → publish via {@link SegmentStore} → flip to
- * ACTIVE → append manifest_version.
+ * catalog row → build on disk → publish via {@link SegmentStore} → stage
+ * tombstone sidecars on S3 → atomically flip segment to ACTIVE, append
+ * manifest_version, and clear staged tombstone rows.
+ *
+ * <p>The final triple (segment state transition, manifest append, staged
+ * unstage) runs in one JDBI transaction via {@link CatalogCommitPublisher}
+ * so staging and manifest are never out of agreement. Tombstone sidecar
+ * writes happen first and are idempotent (bitmap union): a transaction
+ * failure re-runs the sidecar writes on retry without creating duplicates.
  *
  * <p>Every failure path retires the segment row (state = {@code RETIRED})
  * rather than deleting it, so the catalog retains an audit trail, and
  * increments the {@code vectorstore.commit.failures} counter tagged by the
- * phase the failure occurred in: {@code build}, {@code publish}, or
- * {@code catalog}. The counter is intended to feed a later alert.
+ * phase the failure occurred in: {@code build}, {@code publish},
+ * {@code tombstones}, or {@code catalog}.
  *
  * <p>Concurrent commits for the same index are serialised by a per-index
  * {@link ReentrantLock}. Commits for different indexes never contend.
@@ -57,8 +64,8 @@ public class CommitCoordinator {
   public static final String PHASE_BUILD = "build";
 
   public static final String PHASE_PUBLISH = "publish";
-  public static final String PHASE_CATALOG = "catalog";
   public static final String PHASE_TOMBSTONES = "tombstones";
+  public static final String PHASE_CATALOG = "catalog";
 
   private static final Logger LOG = LoggerFactory.getLogger(CommitCoordinator.class);
   private static final ObjectMapper JSON = new ObjectMapper();
@@ -67,9 +74,9 @@ public class CommitCoordinator {
   private final SegmentBuilder builder;
   private final SegmentStore segmentStore;
   private final SegmentRepository segments;
-  private final ManifestVersionRepository manifestVersions;
   private final ManifestResolver manifestResolver;
-  private final InMemoryTombstones tombstones;
+  private final CatalogCommitPublisher commitPublisher;
+  private final CatalogStagedTombstones tombstones;
   private final Searcher searcher;
   private final SidecarLoader sidecarLoader;
   private final Clock clock;
@@ -83,9 +90,9 @@ public class CommitCoordinator {
       SegmentBuilder builder,
       SegmentStore segmentStore,
       SegmentRepository segments,
-      ManifestVersionRepository manifestVersions,
       ManifestResolver manifestResolver,
-      InMemoryTombstones tombstones,
+      CatalogCommitPublisher commitPublisher,
+      CatalogStagedTombstones tombstones,
       Searcher searcher,
       SidecarLoader sidecarLoader,
       Clock clock,
@@ -94,8 +101,8 @@ public class CommitCoordinator {
     this.builder = builder;
     this.segmentStore = segmentStore;
     this.segments = segments;
-    this.manifestVersions = manifestVersions;
     this.manifestResolver = manifestResolver;
+    this.commitPublisher = commitPublisher;
     this.tombstones = tombstones;
     this.searcher = searcher;
     this.sidecarLoader = sidecarLoader;
@@ -108,10 +115,10 @@ public class CommitCoordinator {
    * Returns the committed outcome on success.
    *
    * @throws EmptyCommitException if the buffer was empty at snapshot time.
-   * @throws CommitFailedException if any build, publish, or catalog step
-   *     fails. The segment row (if created) is left in {@code RETIRED}
-   *     state and the {@code vectorstore.commit.failures} counter is
-   *     incremented with the phase tag.
+   * @throws CommitFailedException if any build, publish, tombstone, or
+   *     catalog step fails. The segment row (if created) is left in
+   *     {@code RETIRED} state and the {@code vectorstore.commit.failures}
+   *     counter is incremented with the phase tag.
    */
   public CommitOutcome commit(VectorIndex index) throws CommitFailedException {
     ReentrantLock lock = perIndexLocks.computeIfAbsent(index.indexId(), k -> new ReentrantLock());
@@ -158,45 +165,57 @@ public class CommitCoordinator {
       throw new CommitFailedException(PHASE_PUBLISH, e);
     }
 
+    // Snapshot the staging set and fan the tombstones into every sidecar
+    // that will be active after the commit — the new segment (still
+    // BUILDING in the catalog, but already present on object storage) and
+    // every previously-ACTIVE segment. Sidecar updates are idempotent
+    // bitmap unions, so a subsequent transactional failure is safe to
+    // retry.
+    Set<String> staged = tombstones.snapshot(index.indexId());
+    List<Segment> previousActive = manifestResolver.activeSegments(index.indexId());
+    Segment newSegment =
+        new Segment(
+            segmentId,
+            index.indexId(),
+            SegmentState.ACTIVE,
+            built.vectorCount(),
+            built.bytes(),
+            objectPrefix,
+            clock.instant());
+    List<Segment> willBeActive = new ArrayList<>(previousActive.size() + 1);
+    willBeActive.addAll(previousActive);
+    willBeActive.add(newSegment);
+
+    if (!staged.isEmpty()) {
+      try {
+        for (Segment segment : willBeActive) {
+          applyStagedTombstones(segment, staged);
+        }
+      } catch (IOException e) {
+        failed(segmentId, PHASE_TOMBSTONES, e);
+        throw new CommitFailedException(PHASE_TOMBSTONES, e);
+      }
+    }
+
     int nextVersion;
     try {
-      segments.updateStateAndBytes(segmentId, SegmentState.ACTIVE, built.bytes());
       nextVersion = manifestResolver.currentVersion(index.indexId()).orElse(0) + 1;
-      List<String> segmentIds =
-          new ArrayList<>(
-              manifestResolver.activeSegments(index.indexId()).stream().map(Segment::segmentId).toList());
-      if (!segmentIds.contains(segmentId)) {
-        segmentIds.add(segmentId);
+      List<String> segmentIds = new ArrayList<>(willBeActive.size());
+      for (Segment segment : willBeActive) {
+        segmentIds.add(segment.segmentId());
       }
-      manifestVersions.append(
+      commitPublisher.publish(
+          segmentId,
+          SegmentState.ACTIVE,
+          built.bytes(),
           new ManifestVersion(
-              index.indexId(), nextVersion, JSON.writeValueAsString(segmentIds), clock.instant()));
+              index.indexId(), nextVersion, JSON.writeValueAsString(segmentIds), clock.instant()),
+          index.indexId(),
+          staged);
+      tombstones.recordUnstaged(index.indexId(), staged.size());
     } catch (JsonProcessingException | RuntimeException e) {
       failed(segmentId, PHASE_CATALOG, e);
       throw new CommitFailedException(PHASE_CATALOG, e);
-    }
-
-    try {
-      persistStagedTombstones(index.indexId());
-    } catch (Exception e) {
-      // Post-manifest: the new segment is already ACTIVE and the manifest
-      // has advanced, so we do not roll it back. Staged deletes remain in
-      // staging (removeAll only runs on success inside persistStagedTombstones)
-      // and are retried on the next commit. The failures counter is still
-      // incremented so alerting can catch sustained tombstone persistence
-      // problems.
-      if (LOG.isWarnEnabled()) {
-        LOG.warn(
-            "tombstone persistence failed for index {} after successful commit {}; staged deletes preserved for retry",
-            index.indexId(),
-            segmentId,
-            e);
-      }
-      Counter.builder("vectorstore.commit.failures")
-          .description("Count of commit failures, tagged by phase")
-          .tag("phase", PHASE_TOMBSTONES)
-          .register(meterRegistry)
-          .increment();
     }
 
     return new CommitOutcome(
@@ -204,46 +223,31 @@ public class CommitCoordinator {
   }
 
   /**
-   * Resolve each staged user ID against every active segment's ordinal
-   * map and union the matching ordinals into that segment's persisted
+   * Resolve each staged user ID against {@code segment}'s ordinal map and
+   * union the matching ordinals into the segment's persisted
    * {@code tombstones.roar}. Existing tombstone content is preserved
-   * (merged with the new ordinals) so prior deletes remain in force. Only
-   * segments that gained new tombstones are re-uploaded; untouched
-   * sidecars are left alone.
-   *
-   * <p>Staging is cleared only for the IDs that made it into this commit;
-   * a concurrent delete arriving mid-commit stays for the next one.
+   * (merged with the new ordinals) so prior deletes remain in force.
+   * Segments with no matching ordinals are left untouched.
    */
-  private void persistStagedTombstones(String indexId) throws IOException {
-    Set<String> staged = tombstones.snapshot(indexId);
-    if (staged.isEmpty()) {
+  private void applyStagedTombstones(Segment segment, Set<String> stagedUserIds) throws IOException {
+    RoaringBitmap additions = searcher.ordinalsOf(segment, stagedUserIds);
+    if (additions.isEmpty()) {
       return;
     }
-    List<Segment> activeSegments = manifestResolver.activeSegments(indexId);
-    for (Segment segment : activeSegments) {
-      RoaringBitmap additions = searcher.ordinalsOf(segment, staged);
-      if (additions.isEmpty()) {
-        continue;
-      }
-      TombstoneSidecar existing;
-      try (InputStream in = segmentStore.openSidecar(segment, "tombstones.roar")) {
-        existing = TombstoneSidecar.read(in);
-      }
-      TombstoneSidecar merged = existing.mergedWith(additions);
-      segmentStore.putSidecar(segment, "tombstones.roar", merged.toBytes());
-      // Drop the stale sidecar entry so the next query re-reads the fresh
-      // bytes. Keeping the merged object out of the cache is fine — the
-      // cache will repopulate on first use.
-      sidecarLoader.invalidate(segment);
-      if (LOG.isDebugEnabled()) {
-        LOG.debug(
-            "persisted {} new tombstones into segment {} (total now {})",
-            additions.getCardinality(),
-            segment.segmentId(),
-            merged.bitmap().getCardinality());
-      }
+    TombstoneSidecar existing;
+    try (InputStream in = segmentStore.openSidecar(segment, "tombstones.roar")) {
+      existing = TombstoneSidecar.read(in);
     }
-    tombstones.removeAll(indexId, staged);
+    TombstoneSidecar merged = existing.mergedWith(additions);
+    segmentStore.putSidecar(segment, "tombstones.roar", merged.toBytes());
+    sidecarLoader.invalidate(segment);
+    if (LOG.isDebugEnabled()) {
+      LOG.debug(
+          "persisted {} new tombstones into segment {} (total now {})",
+          additions.getCardinality(),
+          segment.segmentId(),
+          merged.bitmap().getCardinality());
+    }
   }
 
   private static String objectPrefixFor(VectorIndex index, String segmentId) {

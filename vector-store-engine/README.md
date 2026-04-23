@@ -55,9 +55,13 @@ Organised under `io.github.zznate.vectorstore.engine`:
     on segment count — the code path is identical at N=1 and N=100.
   - `ScoredOrdinal` record — one hit: graph ordinal, user ID, score.
 - [`tombstone/`](src/main/java/io/github/zznate/vectorstore/engine/tombstone) —
-  per-index in-memory deletion set.
-  - `InMemoryTombstones` (`@ApplicationScoped`). Lost on restart; the
-    metadata module will persist them in phase 4.
+  per-index staging set for uncommitted deletes.
+  - `CatalogStagedTombstones` (`@ApplicationScoped`). Backed by the
+    `staged_tombstone` catalog table; delete requests survive process
+    restart. `CommitCoordinator` drains the set inside the same JDBI
+    transaction as the manifest-version append via
+    `CatalogCommitPublisher`, so staging and manifest are never out of
+    agreement.
 - [`commit/`](src/main/java/io/github/zznate/vectorstore/engine/commit) —
   the end-to-end commit pipeline.
   - `CommitCoordinator` (`@ApplicationScoped`) orchestrates a single
@@ -86,10 +90,19 @@ same index never interleave; different indexes never contend).
 4. **Publish** — `SegmentStore.publish` moves the temp directory under
    the canonical object prefix and returns its URI. Failure increments
    `vectorstore.commit.failures{phase=publish}`.
-5. **Activate** — `SegmentRepository.updateStateAndBytes` flips the row
-   to `ACTIVE` with the real on-disk byte count, then a new
+5. **Stage tombstones** — the staging set for the index is snapshotted
+   and unioned into each sidecar that will be active after the commit
+   (the new segment plus every previously-ACTIVE segment). Bitmap union
+   is idempotent, so a subsequent catalog-transaction failure is safe to
+   retry. Failure increments
+   `vectorstore.commit.failures{phase=tombstones}`.
+6. **Atomic publish** — `CatalogCommitPublisher.publish` runs three
+   mutations in a single JDBI transaction: flip the new segment row to
+   `ACTIVE` with the real on-disk byte count, insert the new
    `manifest_version` row appending the new segment ID to the active
-   list is written. Failure increments
+   list, and delete the snapshotted rows from `staged_tombstone`.
+   Either all three land or none do, so staging and manifest are never
+   out of agreement. Failure increments
    `vectorstore.commit.failures{phase=catalog}`.
 
 Every failure path leaves the segment row in `RETIRED` state rather than
@@ -103,7 +116,8 @@ attempt.
 1. Open span `vectorstore.query.fanout`.
 2. `ManifestResolver.activeSegments(indexId)` — may return empty (valid
    state for an index with no commits; returns empty hits).
-3. Tombstone snapshot — `InMemoryTombstones.tombstonedIds(indexId)`.
+3. Staged tombstone snapshot — `CatalogStagedTombstones.tombstonedIds(indexId)`
+   (catalog read; survives restart).
 4. For each active segment: `Searcher.buildAcceptMask` (excludes
    tombstoned ordinals), then `Searcher.search` inside
    `vectorstore.query.segment.search`. The searcher opens the graph
@@ -151,9 +165,12 @@ and eagerly registered at boot. The engine emits:
 |---|---|---|---|
 | `vectorstore.commit.duration` | Timer | `phase` (`build` \| `serialize`) | `SegmentBuilder` |
 | `vectorstore.commit.segment_bytes` | DistributionSummary | — | `SegmentBuilder` |
-| `vectorstore.commit.failures` | Counter | `phase` (`build` \| `publish` \| `catalog`) | `CommitCoordinator` |
+| `vectorstore.commit.failures` | Counter | `phase` (`build` \| `publish` \| `tombstones` \| `catalog`) | `CommitCoordinator` |
 | `vectorstore.query.duration` | Timer | `index_id` | `QueryCoordinator` |
 | `vectorstore.query.nodes_visited` | DistributionSummary | `index_id` | `SegmentSearcher` |
+| `vectorstore.tombstone.staged` | Counter | `index_id` | `CatalogStagedTombstones` |
+| `vectorstore.tombstone.unstaged` | Counter | `index_id` | `CatalogStagedTombstones` |
+| `vectorstore.tombstone.staged.count` | Gauge | `index_id` | `CatalogStagedTombstones` |
 
 Spans: `vectorstore.commit.build`, `vectorstore.commit.serialize`,
 `vectorstore.query.fanout`, `vectorstore.query.segment.search`.
