@@ -73,6 +73,8 @@
     <maven.jar.plugin.version>3.4.2</maven.jar.plugin.version>
     <maven.pmd.plugin.version>3.27.0</maven.pmd.plugin.version>
     <pmd.tool.version>7.10.0</pmd.tool.version>
+    <maven.checkstyle.plugin.version>3.6.0</maven.checkstyle.plugin.version>
+    <checkstyle.tool.version>10.21.4</checkstyle.tool.version>
     <build.helper.plugin.version>3.6.0</build.helper.plugin.version>
 
     <!--
@@ -308,6 +310,26 @@
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-jar-plugin</artifactId>
           <version>${maven.jar.plugin.version}</version>
+        </plugin>
+
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-checkstyle-plugin</artifactId>
+          <version>${maven.checkstyle.plugin.version}</version>
+          <dependencies>
+            <dependency>
+              <groupId>com.puppycrawl.tools</groupId>
+              <artifactId>checkstyle</artifactId>
+              <version>${checkstyle.tool.version}</version>
+            </dependency>
+          </dependencies>
+          <configuration>
+            <configLocation>${maven.multiModuleProjectDirectory}/tools/checkstyle.xml</configLocation>
+            <consoleOutput>true</consoleOutput>
+            <failOnViolation>true</failOnViolation>
+            <includeTestSourceDirectory>false</includeTestSourceDirectory>
+            <linkXRef>false</linkXRef>
+          </configuration>
         </plugin>
 
         <plugin>

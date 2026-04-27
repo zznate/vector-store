@@ -119,9 +119,15 @@ public class FilterCompiler {
       return "0-25";
     }
     double ratio = (double) accepted / (double) size;
-    if (ratio < 0.25) return "0-25";
-    if (ratio < 0.50) return "25-50";
-    if (ratio < 0.75) return "50-75";
+    if (ratio < 0.25) {
+      return "0-25";
+    }
+    if (ratio < 0.50) {
+      return "25-50";
+    }
+    if (ratio < 0.75) {
+      return "50-75";
+    }
     return "75-100";
   }
 }
