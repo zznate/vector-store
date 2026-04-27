@@ -53,25 +53,31 @@ Packages under `io.github.zznate.vectorstore.storage`:
   on failure). `openGraph(Segment)` returns a `ReaderSupplier` that hands
   JVector a fresh block-cached reader per `get()` call.
 
-## Block cache sizing
+## Block cache behaviour
 
-Defaults are 64 MiB total with 64 KiB blocks, which comfortably holds every
-block touched by an 8-segment Phase-1 index across a warm workload.
-Tuning guidance:
+Configuration keys, defaults, and tuning intent live under
+`vectorstore.cache.block.*` — see the
+[Cache configuration reference](../vector-store-core/README.md#cache-configuration-reference)
+in `vector-store-core` for the canonical table. Implementation-specific
+notes live here:
 
-- **Raise `vectorstore.storage.block-cache.bytes`** if the working set of
-  graph blocks exceeds the budget and the hit rate drops. Headroom is
-  cheap; dropping a block costs a cold ranged `GetObject`.
-- **Enable the off-heap L2 tier** with
-  `vectorstore.storage.block-cache.l2.enabled=true` and
-  `vectorstore.storage.block-cache.l2.bytes=<bytes>` for warm workloads
-  whose footprint exceeds the on-heap budget. The L2 tier uses JDK 21
-  FFM arenas (one per cached block); native memory is freed on eviction
-  with no GC dependency.
-- **Tune `block-size` to the graph stride.** Larger blocks amortise
-  per-request overhead; smaller blocks waste less when reads are
-  fine-grained. 64 KiB is a safe default for JVector's on-disk format.
-- **Hit / miss ratios** by tier are on Prometheus via
+- **Block size matters.** JVector reads variably-sized chunks of the
+  graph file; pick a block size that amortises per-request overhead
+  without over-fetching on fine-grained reads. The 64 KiB default fits
+  JVector's on-disk format well.
+- **L2 is JDK-21 FFM-arena off-heap.** One arena per cached block;
+  native memory is freed synchronously on eviction with no GC
+  dependency. Enabling L2 requires `--enable-preview` on every JVM
+  entry point (already wired in the parent POM).
+- **L1↔L2 promotion on read.** A miss-on-L1 / hit-on-L2 promotes the
+  block back to L1, so a cold block becomes hot after one successful
+  off-heap read.
+- **MINIMAL-policy indexes bypass L2.** Every per-segment reader for an
+  index whose `IndexBuildParams.cachePolicy = MINIMAL` is constructed
+  with `useL2=false`, so cold blocks for those indexes neither read
+  from nor warm the off-heap tier. SMART (default) and RESIDENT indexes
+  use both tiers.
+- **Hit / miss ratios by tier** are on Prometheus via
   `vectorstore.cache.{hit,miss,eviction}{tier, cache_name=block}` —
   watch `tier=l1_heap` and `tier=l2_offheap` to see promotion behaviour.
 
@@ -81,7 +87,8 @@ Tuning guidance:
 `vectorstore.segments.store`:
 
 - `s3` (default) → `S3SegmentStore` from this module, with injected
-  `S3Client`, `StorageConfig`, `BlockCache`, `MeterRegistry`, `Tracer`.
+  `S3Client`, `StorageConfig`, the block size from `CacheConfig`,
+  `BlockCache`, `CachePolicyResolver`, `MeterRegistry`, and `Tracer`.
 - `local` → phase-2 `LocalSegmentStore` from
   [`vector-store-engine`](../vector-store-engine/README.md) (for tests and
   developers without Docker).

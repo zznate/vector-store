@@ -197,6 +197,27 @@ Repository interfaces in `vector-store-core/catalog/repository/`. JDBI-backed im
 
 All configurable per-index via `engine_params` JSON at index-creation time. The listed defaults applied when omitted.
 
+## Warm-tier caches (Phase 2)
+
+Four warm-tier caches sit between the catalog/object store and every read-heavy code path:
+
+- **`BlockCache`** — fixed-size byte blocks of segment graph files. L1 heap + optional L2 off-heap arena tier. Owned by [`vector-store-storage`](../vector-store-storage/README.md).
+- **`SidecarCache`** — parsed `attributes.jsonl` / `tombstones.roar` per segment. L1 heap only. Owned by [`vector-store-metadata`](../vector-store-metadata/README.md).
+- **`ManifestCache`** — active-segment lists keyed by `(indexId, version)` plus a TTL cache of `currentVersion(indexId)`. Owned by [`vector-store-core`](../vector-store-core/README.md).
+- **`SegmentHandleCache`** — loaded `OnDiskGraphIndex` + ordinal-to-user-id array per segment, with a pinned map exempt from LRU for `RESIDENT` indexes. Owned by [`vector-store-engine`](../vector-store-engine/README.md).
+
+Budgets are configured through a single `vectorstore.cache.*` tree bound by `CacheConfig`. The **definitive parameter reference** (every key, type, default, tuning intent) lives in [`vector-store-core`'s README](../vector-store-core/README.md#cache-configuration-reference); sibling READMEs link there rather than duplicate the table.
+
+### Per-index cache policy
+
+Cache *behaviour* per index lives on `IndexBuildParams.cachePolicy` (persisted in `vector_index.engine_params` JSON). `CachePolicyEnforcer.onQuery(indexId, active)` runs once per query and reconciles the policy against the active-segment list:
+
+- **`RESIDENT`** — every active segment is pinned in `SegmentHandleCache`. Pinned handles live outside the LRU tier and are never evicted under SMART pressure. Per-index gauges `vectorstore.cache.resident.bytes` and `vectorstore.cache.resident.segments` track the pinned set. Use for indexes with the strictest latency floor.
+- **`SMART`** (default) — handles share the LRU budget; block bytes use L1 with optional L2.
+- **`MINIMAL`** — block reads use L1 only; the L2 off-heap tier is bypassed for this index's segments at both read and write. Use for cost-sensitive cold indexes where the warm-tier overhead is not justified.
+
+The policy is the architectural contract. Defaults, ranges, and per-cache budgets are operational and live in the core README — they will tune over time and are not part of the design surface.
+
 ## Observability plan
 
 Single OTLP gRPC exporter. Resource attributes:
@@ -222,6 +243,8 @@ Single OTLP gRPC exporter. Resource attributes:
 | `vectorstore.cache.eviction` | Counter | `tier`, `cache_name` | Entries evicted by the tier's bounding policy |
 | `vectorstore.cache.bytes.current` | Gauge | `tier`, `cache_name` | Bytes currently held by the tier |
 | `vectorstore.cache.entries.current` | Gauge | `tier`, `cache_name` | Entry count currently held by the tier |
+| `vectorstore.cache.resident.bytes` | Gauge | `index_id` | Bytes pinned in `SegmentHandleCache` for a `RESIDENT` index; zero for `SMART` / `MINIMAL` |
+| `vectorstore.cache.resident.segments` | Gauge | `index_id` | Number of segments pinned for a `RESIDENT` index |
 | `vectorstore.filter.compile.duration` | Histogram | index_id, term_count, result_ratio_bucket | Filter compilation cost; `result_ratio_bucket` is one of `0-25`, `25-50`, `50-75`, `75-100` |
 | `vectorstore.query.filtered_ratio` | DistributionSummary | index_id | Fraction of ordinals accepted per segment (scaled to 0–100) |
 

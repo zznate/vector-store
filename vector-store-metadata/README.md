@@ -40,9 +40,10 @@ Packages under `io.github.zznate.vectorstore.metadata`:
   | `SidecarCache` | Process-wide Caffeine cache of parsed sidecars with byte-weighted eviction across attributes and tombstones (default 128 MiB total). |
   | `SidecarLoader` | Facade that returns parsed sidecars, loading from `SegmentStore.openSidecar` on miss and caching the result. Used by both `QueryCoordinator` (query path) and `CommitCoordinator` (which also calls `invalidate(segment)` after re-uploading tombstones so queries see the fresh bytes). |
 
-- [`config/MetadataConfig`](src/main/java/io/github/zznate/vectorstore/metadata/config/MetadataConfig.java)
-  — `@ConfigMapping(prefix="vectorstore.metadata")` exposing the sidecar
-  cache size.
+Cache budget is read from
+[`CacheConfig.sidecar()`](../vector-store-core/src/main/java/io/github/zznate/vectorstore/core/cache/CacheConfig.java)
+in `vector-store-core` — see the [Sidecar cache sizing](#sidecar-cache-sizing)
+section below for the property keys.
 
 ## Phase 1 filter semantics
 
@@ -59,19 +60,25 @@ Packages under `io.github.zznate.vectorstore.metadata`:
   the query coordinator further short-circuits to `Bits.ALL` so the
   common case allocates nothing.
 
-## Sidecar cache sizing
+## Sidecar cache behaviour
 
-Defaults: 128 MiB total across every cached sidecar (both attributes and
-tombstones), evicted byte-weighted LRU. Tuning pointers:
+Configuration keys, defaults, and tuning intent live under
+`vectorstore.cache.sidecar.*` — see the
+[Cache configuration reference](../vector-store-core/README.md#cache-configuration-reference)
+in `vector-store-core` for the canonical table. Implementation-specific
+notes live here:
 
-- **Raise `vectorstore.metadata.sidecar-cache.bytes`** if the working set
-  of segments exceeds the budget (warm hit rate falls). Sidecars are much
-  smaller than graph files, so the headroom is cheap.
-- **Attribute sidecars** dominate cache size when workloads write many
+- **Byte-weighted, single tier.** Both attribute sidecars and tombstone
+  bitmaps share one heap budget evicted byte-weighted LRU. There is no
+  L2 tier yet; the working set must fit in L1.
+- **Attribute sidecars dominate cache size** when workloads write many
   attributes per vector. Tombstones are always small unless a segment
   has been heavily deleted.
-- Cache metrics are exposed via Caffeine's stats facility; wiring
-  them onto Prometheus counters is a phase-2 item.
+- **Sidecars are much smaller than graph files**, so headroom on the
+  budget is cheap relative to the cost of a cold sidecar parse.
+- **Cache metrics** flow through the shared `HeapCacheTier` and surface
+  as `vectorstore.cache.{hit,miss,eviction}{tier=l1_heap, cache_name=sidecar}`
+  on `/q/metrics`.
 
 ## Dependencies
 
@@ -99,10 +106,9 @@ tombstones), evicted byte-weighted LRU. Tuning pointers:
   new sealed variants.
 - **Attribute type system** beyond strings. Requires a schema carried on
   the index or negotiated at write time.
-- **Durable staged deletes** (WAL or catalog table) so uncommitted
-  deletes survive restart. Today, in-memory staging is lost on restart.
-- **Multi-tier sidecar cache** (local SSD, Redis) layered behind
-  `SidecarCache` without changing the facade.
+- **Multi-tier sidecar cache**: an `L2Provider` behind the heap tier
+  (the same shape the block cache already uses) when sidecar working
+  sets routinely exceed the heap budget.
 
 ## Local development
 

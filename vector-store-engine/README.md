@@ -52,12 +52,24 @@ Organised under `io.github.zznate.vectorstore.engine`:
     query over the shared handle.
   - `SegmentHandle` record bundling the loaded JVector graph and the
     parsed ordinal→user-id array.
-  - `SegmentHandleCache` (`@ApplicationScoped`). Bounded LRU
-    (default 256 handles, count-weighted) built on `HeapCacheTier`. On
-    miss it single-flights the load under a per-segment lock and
-    records the `vectorstore.cache.segment_handle.load` span; on
-    eviction it closes the underlying `OnDiskGraphIndex` so native
-    resources are released.
+  - `SegmentHandleCache` (`@ApplicationScoped`). Bounded LRU built on
+    `HeapCacheTier`. Sized via
+    `vectorstore.cache.segment-handle.max-entries` (see the
+    [cache configuration reference](../vector-store-core/README.md#cache-configuration-reference)
+    for the full key list). On miss it single-flights the load under a
+    per-segment lock and records the
+    `vectorstore.cache.segment_handle.load` span; on eviction it closes
+    the underlying `OnDiskGraphIndex` so native resources are released.
+    Also exposes `pin(segment)` / `unpin(segmentId)` for handles that
+    must survive LRU pressure — pinned entries live outside the tier
+    and are returned in preference to any tier copy.
+  - `CachePolicyEnforcer` (`@ApplicationScoped`). Reconciles the
+    per-index `CachePolicy` against the live active-segment list every
+    query: for `RESIDENT` indexes it pins newly-active segments and
+    unpins segments no longer active. `SMART` (default) and `MINIMAL`
+    indexes are no-ops on this path. Per-index gauges
+    `vectorstore.cache.resident.bytes` and
+    `vectorstore.cache.resident.segments` track the pinned set.
   - `QueryCoordinator` (`@ApplicationScoped`). Resolves the active
     manifest through `ManifestCache`, fans out across every segment,
     merges the per-segment hits into top-k via a bounded heap. The
@@ -126,17 +138,21 @@ attempt.
 1. Open span `vectorstore.query.fanout`.
 2. `ManifestCache.activeSegments(indexId)` — cache-first, backed by
    `ManifestResolver`. Returns empty for an index with no commits.
-3. Staged tombstone snapshot — `CatalogStagedTombstones.tombstonedIds(indexId)`
+3. `CachePolicyEnforcer.onQuery(indexId, active)` — pins / unpins
+   segments per the index's policy. No-op for SMART and MINIMAL
+   indexes; for RESIDENT, every active segment is pinned in
+   `SegmentHandleCache` so warm-tier latency never pays a re-load.
+4. Staged tombstone snapshot — `CatalogStagedTombstones.tombstonedIds(indexId)`
    (catalog read; survives restart).
-4. For each active segment: `Searcher.buildAcceptMask` (excludes
+5. For each active segment: `Searcher.buildAcceptMask` (excludes
    tombstoned ordinals), then `Searcher.search` inside
    `vectorstore.query.segment.search`. The searcher opens the graph
    via `SegmentStore.openGraph`, runs JVector's `GraphSearcher`, and
    translates the returned ordinals to user IDs via the cached
    ordinal map.
-5. Merge — a bounded min-heap of size `topK` across every per-segment
+6. Merge — a bounded min-heap of size `topK` across every per-segment
    hit. Result list is sorted descending by score.
-6. Record `vectorstore.query.duration` timer, tagged by `index_id`.
+7. Record `vectorstore.query.duration` timer, tagged by `index_id`.
 
 ## JVector parameters
 
@@ -155,6 +171,8 @@ persisted as JSON in `vector_index.engine_params`.
 | `pqSubspaces` | 128 | Product-quantisation subspaces. Must divide the vector dimension. Unused in phase 2 (`InlineVectors` stores the raw vectors). |
 | `pqSubspaceClusters` | 256 | Cluster count per subspace. One byte per subspace index. |
 | `addHierarchy` | `false` | `false` = flat Vamana / DiskANN graph; `true` = HNSW-style multi-layer graph. On-disk format is compatible either way. |
+| `cachePolicy` | `SMART` | Warm-tier residency policy: `RESIDENT` pins every active segment in `SegmentHandleCache`, `SMART` lets the LRU tier handle eviction, `MINIMAL` keeps L1 only and bypasses the L2 block tier. |
+| `cacheBytes` | `null` | Optional per-index byte hint. Advisory in phase 2A; load-bearing once isolated arenas land. Negative values are rejected. |
 
 Every parameter is settable per-index at creation time. Tuning advice:
 
@@ -181,10 +199,14 @@ and eagerly registered at boot. The engine emits:
 | `vectorstore.tombstone.staged` | Counter | `index_id` | `CatalogStagedTombstones` |
 | `vectorstore.tombstone.unstaged` | Counter | `index_id` | `CatalogStagedTombstones` |
 | `vectorstore.tombstone.staged.count` | Gauge | `index_id` | `CatalogStagedTombstones` |
+| `vectorstore.cache.resident.bytes` | Gauge | `index_id` | `CachePolicyEnforcer` |
+| `vectorstore.cache.resident.segments` | Gauge | `index_id` | `CachePolicyEnforcer` |
+| `vectorstore.cache.hit` / `.miss` / `.eviction` | Counter | `tier`, `cache_name` (`block` \| `sidecar` \| `manifest` \| `segment_handle`) | `HeapCacheTier`, `OffHeapArenaL2Provider` |
 
 Spans: `vectorstore.commit.build`, `vectorstore.commit.serialize`,
-`vectorstore.query.fanout`, `vectorstore.query.segment.search`.
-`segment_id` and `index_id` attributes are attached where meaningful.
+`vectorstore.query.fanout`, `vectorstore.query.segment.search`,
+`vectorstore.cache.segment_handle.load`. `segment_id` and `index_id`
+attributes are attached where meaningful.
 
 ## Dependencies
 

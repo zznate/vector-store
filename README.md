@@ -24,8 +24,8 @@ the design notes are authoritative.
 
 | Phase | Goal | Status |
 |-------|------|--------|
-| 1 | Cold-archive proof of concept. One immutable segment per commit. Explicit commit. Infrequent-query latency target 100–500 ms. | In progress |
-| 2 | Warm-query tier: real multi-level caching, LSM-shaped compaction, concurrent writers, richer filter grammar. | Planned — the architecture does not preclude it |
+| 1 | Cold-archive proof of concept. One immutable segment per commit. Explicit commit. Infrequent-query latency target 100–500 ms. | Landed |
+| 2 | Warm-query tier: tiered block cache (L1 heap + optional L2 off-heap arena), bounded segment-handle cache, version-keyed manifest cache, per-index cache policy (`RESIDENT` / `SMART` / `MINIMAL`), durable staged tombstones, LSM-shaped compaction, concurrent writers, richer filter grammar. | In progress |
 
 Phase 1 invariants (see `docs/design-notes.md` for the full list) must not
 regress: Index→Manifest→[Segment] always, user-id↔(segment,ordinal) mapping
