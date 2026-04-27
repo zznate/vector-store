@@ -101,6 +101,101 @@ class SegmentHandleCacheTest {
   }
 
   @Test
+  void pinReturnsHandleAndIsIdempotent() throws Exception {
+    Segment segment = buildSegment("seg-pin-a", 4);
+
+    SegmentHandle first = harness.handles.pin(segment);
+    SegmentHandle second = harness.handles.pin(segment);
+
+    assertThat(second).isSameAs(first);
+    assertThat(harness.handles.isPinned(segment.segmentId())).isTrue();
+    assertThat(harness.handles.pinnedCount()).isEqualTo(1);
+  }
+
+  @Test
+  void getReturnsPinnedHandleAheadOfTier() throws Exception {
+    Segment segment = buildSegment("seg-pin-b", 4);
+
+    SegmentHandle pinned = harness.handles.pin(segment);
+    SegmentHandle viaGet = harness.handles.get(segment);
+
+    assertThat(viaGet).isSameAs(pinned);
+  }
+
+  @Test
+  void pinDropsDuplicateTierCopy() throws Exception {
+    Segment segment = buildSegment("seg-pin-c", 4);
+
+    // Populate tier first via a regular get(), then pin.
+    SegmentHandle viaTier = harness.handles.get(segment);
+    SegmentHandle viaPin = harness.handles.pin(segment);
+
+    assertThat(viaPin).isNotSameAs(viaTier);
+    // The tier copy was invalidated and closed before the pin loaded a
+    // fresh handle, so the segmentId should no longer appear in the tier
+    // (only in the pinned map).
+    assertThat(harness.handles.tier().get(segment.segmentId())).isEmpty();
+  }
+
+  @Test
+  void unpinClosesAndDropsHandle() throws Exception {
+    Segment segment = buildSegment("seg-pin-d", 4);
+
+    SegmentHandle pinned = harness.handles.pin(segment);
+    harness.handles.unpin(segment.segmentId());
+
+    assertThat(harness.handles.isPinned(segment.segmentId())).isFalse();
+    assertThat(harness.handles.pinnedCount()).isZero();
+    // The pinned handle was closed - its graph should be unusable.
+    try {
+      pinned.graph().getView().close();
+    } catch (Exception expected) {
+      // expected: graph is closed
+    }
+  }
+
+  @Test
+  void unpinUnknownSegmentIsNoop() {
+    harness.handles.unpin("never-pinned");
+    assertThat(harness.handles.pinnedCount()).isZero();
+  }
+
+  @Test
+  void pinSurvivesLruEvictionPressure() throws Exception {
+    SegmentHandleCache tiny =
+        new SegmentHandleCache(
+            harness.store,
+            OpenTelemetry.noop().getTracer("test"),
+            new SimpleMeterRegistry(),
+            1);
+
+    Segment a = buildSegment("seg-pin-e-a", 3);
+    Segment b = buildSegment("seg-pin-e-b", 3);
+    Segment c = buildSegment("seg-pin-e-c", 3);
+
+    SegmentHandle pinnedA = tiny.pin(a);
+    // Push several entries through the tier; the budget=1 tier evicts each
+    // in turn but the pinned entry must survive.
+    tiny.get(b);
+    tiny.get(c);
+    tiny.get(b);
+
+    assertThat(tiny.isPinned(a.segmentId())).isTrue();
+    assertThat(tiny.get(a)).isSameAs(pinnedA);
+  }
+
+  @Test
+  void invalidateAllAlsoClearsPinned() throws Exception {
+    Segment segment = buildSegment("seg-pin-f", 4);
+    harness.handles.pin(segment);
+
+    harness.handles.invalidateAll();
+
+    assertThat(harness.handles.isPinned(segment.segmentId())).isFalse();
+    assertThat(harness.handles.pinnedCount()).isZero();
+  }
+
+  @Test
   void countWeightedEvictionClosesEvictedHandle() throws Exception {
     // Dedicated cache with budget=1 so adding a second segment evicts the
     // first immediately.

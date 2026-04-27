@@ -22,22 +22,38 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 /**
- * Bounded per-segment {@link SegmentHandle} cache. Replaces the unbounded
- * {@code ordinalMaps} map that {@code SegmentSearcher} used to keep: now
- * every handle has a clear lifecycle — loaded on cold access, reused by
- * every subsequent query, closed on LRU eviction.
+ * Bounded per-segment {@link SegmentHandle} cache. Each handle is loaded
+ * on cold access, reused by every subsequent query, and closed on LRU
+ * eviction or explicit unpin.
  *
  * <p>Concurrent cold access for the same segment single-flights through a
  * per-id lock so only one loader runs. The load span
  * {@code vectorstore.cache.segment_handle.load} records the cost on the
  * cold path.
  *
+ * <p>Two storage layers coexist:
+ *
+ * <ol>
+ *   <li>An LRU {@link HeapCacheTier} bounded by entry count, the default
+ *       store for SMART-policy indexes.
+ *   <li>A {@link #pin pinned} map keyed by segment id that is exempt from
+ *       LRU eviction. {@link io.github.zznate.vectorstore.core.cache.CachePolicy#RESIDENT}
+ *       indexes pin every active segment via this path so warm-tier
+ *       latency never pays a re-load.
+ * </ol>
+ *
+ * <p>{@link #get} consults the pinned map first, falling through to the
+ * LRU tier. Pinning a segment also evicts any duplicate copy from the LRU
+ * tier so a process never holds two {@link OnDiskGraphIndex} instances for
+ * the same segment.
+ *
  * <p>Known race: an LRU eviction fires while another thread is reading
  * through the handle's {@link OnDiskGraphIndex}. The evicted handle's
  * {@code close()} may release resources the reader still touches. In
  * practice evictions are rare when the cache is sized to the working set;
- * a follow-up iteration can add reference-counted retention to eliminate
- * the race entirely.
+ * reference-counted retention would eliminate the race entirely if it
+ * matters in production. Pinned handles are not subject to this race
+ * because they are not LRU-evicted.
  */
 @ApplicationScoped
 public class SegmentHandleCache {
@@ -52,6 +68,7 @@ public class SegmentHandleCache {
   private final Tracer tracer;
   private final HeapCacheTier<String, SegmentHandle> tier;
   private final ConcurrentMap<String, Object> loadLocks = new ConcurrentHashMap<>();
+  private final ConcurrentMap<String, SegmentHandle> pinned = new ConcurrentHashMap<>();
 
   @Inject
   public SegmentHandleCache(
@@ -71,9 +88,17 @@ public class SegmentHandleCache {
             .build();
   }
 
-  /** Returns a cached or freshly loaded handle for {@code segment}. */
+  /**
+   * Returns a cached or freshly loaded handle for {@code segment}. Pinned
+   * handles take precedence; on miss the LRU tier is consulted, then the
+   * single-flight loader runs.
+   */
   public SegmentHandle get(Segment segment) throws IOException {
     String id = segment.segmentId();
+    SegmentHandle pinnedHandle = pinned.get(id);
+    if (pinnedHandle != null) {
+      return pinnedHandle;
+    }
     Optional<SegmentHandle> cached = tier.get(id);
     if (cached.isPresent()) {
       return cached.get();
@@ -94,13 +119,74 @@ public class SegmentHandleCache {
     }
   }
 
-  /** Drop the cached handle for {@code segmentId}, closing it. */
+  /**
+   * Pin a segment's handle so it is never LRU-evicted while pinned.
+   * Idempotent: re-pinning returns the existing pinned handle. Drops any
+   * duplicate copy from the LRU tier so the process holds at most one
+   * graph index per segment.
+   *
+   * <p>Used by the cache-policy enforcer to keep
+   * {@link io.github.zznate.vectorstore.core.cache.CachePolicy#RESIDENT}
+   * indexes resident across query bursts and SMART-index eviction
+   * pressure.
+   */
+  public SegmentHandle pin(Segment segment) throws IOException {
+    String id = segment.segmentId();
+    SegmentHandle existing = pinned.get(id);
+    if (existing != null) {
+      return existing;
+    }
+    Object lock = loadLocks.computeIfAbsent(id, k -> new Object());
+    try {
+      synchronized (lock) {
+        existing = pinned.get(id);
+        if (existing != null) {
+          return existing;
+        }
+        // Drop any tier copy first so we never hold two OnDiskGraphIndex
+        // instances open against the same segment.
+        tier.invalidate(id);
+        SegmentHandle loaded = loadUnderSpan(segment);
+        pinned.put(id, loaded);
+        return loaded;
+      }
+    } finally {
+      loadLocks.remove(id, lock);
+    }
+  }
+
+  /**
+   * Release a pinned handle. The handle is closed synchronously. No-op if
+   * {@code segmentId} was not pinned.
+   */
+  public void unpin(String segmentId) {
+    SegmentHandle removed = pinned.remove(segmentId);
+    if (removed != null) {
+      removed.close();
+    }
+  }
+
+  /** Whether {@code segmentId} is currently pinned. */
+  public boolean isPinned(String segmentId) {
+    return pinned.containsKey(segmentId);
+  }
+
+  /** Number of currently-pinned handles. */
+  public int pinnedCount() {
+    return pinned.size();
+  }
+
+  /** Drop the cached handle for {@code segmentId}, closing it. Does not unpin. */
   public void invalidate(String segmentId) {
     tier.invalidate(segmentId);
   }
 
-  /** Drop every cached handle, closing each one. */
+  /** Drop every cached handle, closing each one. Also unpins everything. */
   public void invalidateAll() {
+    for (SegmentHandle handle : pinned.values()) {
+      handle.close();
+    }
+    pinned.clear();
     tier.invalidateAll();
   }
 
