@@ -14,6 +14,8 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * {@link SegmentStore} backed by a local directory tree that mirrors the
@@ -29,6 +31,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * released at {@link #close()}.
  */
 public class LocalSegmentStore implements SegmentStore, AutoCloseable {
+
+  private static final Logger LOG = LoggerFactory.getLogger(LocalSegmentStore.class);
 
   private final Path root;
   private final ConcurrentHashMap<String, ReaderSupplier> graphSuppliers = new ConcurrentHashMap<>();
@@ -77,11 +81,16 @@ public class LocalSegmentStore implements SegmentStore, AutoCloseable {
    */
   @Override
   public void close() {
-    for (ReaderSupplier supplier : graphSuppliers.values()) {
+    for (var entry : graphSuppliers.entrySet()) {
       try {
-        supplier.close();
-      } catch (IOException ignore) {
-        // Best-effort on shutdown.
+        entry.getValue().close();
+      } catch (IOException e) {
+        // Best-effort on shutdown — we still want the close loop to
+        // continue across remaining suppliers, but operators need the
+        // stack trace to triage a leaked mapping.
+        if (LOG.isWarnEnabled()) {
+          LOG.warn("failed to close graph supplier for segment {}", entry.getKey(), e);
+        }
       }
     }
     graphSuppliers.clear();

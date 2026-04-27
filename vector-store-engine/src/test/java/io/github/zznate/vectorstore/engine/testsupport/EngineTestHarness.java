@@ -27,6 +27,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Wires up {@link SegmentBuilder}, {@link LocalSegmentStore}, and
@@ -35,6 +37,8 @@ import java.util.Optional;
  * place for every engine-level test to reuse.
  */
 public final class EngineTestHarness implements AutoCloseable {
+
+  private static final Logger LOG = LoggerFactory.getLogger(EngineTestHarness.class);
 
   public final Clock clock = Clock.systemUTC();
   public final Tracer tracer = OpenTelemetry.noop().getTracer("vector-store-engine-test");
@@ -117,8 +121,13 @@ public final class EngineTestHarness implements AutoCloseable {
               q -> {
                 try {
                   Files.deleteIfExists(q);
-                } catch (IOException ignore) {
-                  // best-effort cleanup
+                } catch (IOException e) {
+                  // Best-effort cleanup — keep walking the tree but
+                  // surface the stack trace so a leaked file shows up
+                  // in the test logs rather than being silently lost.
+                  if (LOG.isWarnEnabled()) {
+                    LOG.warn("failed to delete temp path {} during test cleanup", q, e);
+                  }
                 }
               });
     }

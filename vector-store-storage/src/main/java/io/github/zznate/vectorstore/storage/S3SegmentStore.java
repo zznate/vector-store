@@ -296,9 +296,13 @@ public class S3SegmentStore implements SegmentStore, AutoCloseable {
               .key(key)
               .uploadId(uploadId)
               .build());
-    } catch (RuntimeException ignore) {
+    } catch (RuntimeException e) {
+      // Multipart abort is best-effort cleanup — the original upload
+      // failure is already being thrown by the caller. We log at debug
+      // (not warn) so a failed upload does not produce two stack traces
+      // for operators to triage.
       if (LOG.isDebugEnabled()) {
-        LOG.debug("abortMultipartUpload failed for key={} uploadId={}", key, uploadId, ignore);
+        LOG.debug("abortMultipartUpload failed for key={} uploadId={}", key, uploadId, e);
       }
     }
   }
