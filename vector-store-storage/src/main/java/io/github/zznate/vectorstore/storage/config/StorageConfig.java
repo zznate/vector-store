@@ -58,5 +58,28 @@ public interface StorageConfig {
     @WithName("block-size")
     @WithDefault("65536")
     int blockSize();
+
+    /** Optional off-heap L2 tier for block bytes. Disabled by default. */
+    L2Config l2();
+
+    interface L2Config {
+
+      /**
+       * Enable the off-heap arena tier behind the on-heap block cache.
+       * When false the block cache serves from L1 only and falls
+       * straight through to the object store on miss.
+       */
+      @WithDefault("false")
+      boolean enabled();
+
+      /**
+       * Maximum off-heap byte budget for the L2 tier. Default 256 MiB
+       * — typically sized 4–8x larger than the L1 heap budget so warm
+       * blocks survive longer between queries. Ignored when
+       * {@link #enabled()} is false.
+       */
+      @WithDefault("268435456")
+      long bytes();
+    }
   }
 }

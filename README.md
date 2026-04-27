@@ -52,7 +52,7 @@ attribute sidecar, tombstone bits AND-ed into the accept mask.
 
 | Layer | Choice |
 |-------|--------|
-| Language / JDK | Java 21 LTS (Panama Vector API via `--add-modules=jdk.incubator.vector`) |
+| Language / JDK | Java 21 LTS (Panama Vector API via `--add-modules=jdk.incubator.vector`; FFM Arena via `--enable-preview` until JDK 22) |
 | Framework | Quarkus 3.33.1 LTS |
 | Build | Maven 3.9+, multi-module |
 | Index engine | JVector 4.0.0-rc.8 |
@@ -161,7 +161,7 @@ them for Surefire / Failsafe automatically. For container images and
 production, pass them via `JAVA_TOOL_OPTIONS`:
 
 ```
-JAVA_TOOL_OPTIONS="--add-modules=jdk.incubator.vector --enable-native-access=ALL-UNNAMED"
+JAVA_TOOL_OPTIONS="--add-modules=jdk.incubator.vector --enable-native-access=ALL-UNNAMED --enable-preview"
 ```
 
 Runtime configuration lives in

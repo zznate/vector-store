@@ -26,7 +26,7 @@ Packages under `io.github.zznate.vectorstore.storage`:
 - [`config/`](src/main/java/io/github/zznate/vectorstore/storage/config) —
   `StorageConfig` (`@ConfigMapping(prefix="vectorstore.storage")`) binds the
   endpoint, region, bucket, credentials, path-style-access toggle, and the
-  nested `block-cache.{bytes, block-size}`.
+  nested `block-cache.{bytes, block-size, l2.{enabled, bytes}}`.
 - [`S3ClientProducer`](src/main/java/io/github/zznate/vectorstore/storage/S3ClientProducer.java)
   — `@Produces @Singleton S3Client` built from `StorageConfig`. Uses the
   URL-connection HTTP client (no Netty); 2 s connect timeout, 30 s read
@@ -37,11 +37,13 @@ Packages under `io.github.zznate.vectorstore.storage`:
   | `RangeReader` | Narrow seam (`readRange(offset, dst, dstOffset, length)`). Implemented by `S3RandomAccessReader` in prod and by test doubles in tests. |
   | `S3RandomAccessReader` | `RandomAccessReader` that issues a ranged `GetObject` per read. Emits `vectorstore.storage.range_get` spans, `vectorstore.storage.get.duration{cache_hit=false}`, `vectorstore.storage.get.bytes{direction=download}`. Stateful, **not thread-safe** (matches JVector's contract). |
   | `S3ReaderSupplier` | `ReaderSupplier` bound to a `(bucket, key)` pair. Probes the object length via `HeadObject` once at construction; each `get()` returns a fresh reader. |
-  | `BlockCachingRandomAccessReader` | Decorator that serves reads out of a shared block cache, falling back to an underlying `RangeReader` on miss. Emits `vectorstore.cache.block.hit`, `vectorstore.cache.block.miss`, and `vectorstore.storage.get.duration{cache_hit=true}` on hits. |
+  | `BlockCachingRandomAccessReader` | Decorator that serves reads out of the tiered block cache, falling back to an underlying `RangeReader` on miss. Emits `vectorstore.storage.get.duration{cache_hit=true}` on hits; the underlying tiers carry the `vectorstore.cache.{hit,miss,eviction}` counters tagged by `tier` and `cache_name=block`. |
 - [`cache/`](src/main/java/io/github/zznate/vectorstore/storage/cache) —
-  `BlockKey(objectKey, blockIndex)`, `BlockCache` (Caffeine
-  `Cache<BlockKey, byte[]>` with byte-weighted eviction), and
-  `BlockCacheProducer`.
+  `BlockKey(objectKey, blockIndex)`, `BlockCache` (tiered facade: an
+  on-heap `HeapCacheTier<BlockKey, byte[]>` with byte-weighted eviction
+  and an optional off-heap `OffHeapArenaL2Provider` behind it), and
+  `BlockCacheProducer`. Writes are write-through; cold L1 reads consult
+  L2 and promote to L1 on hit.
 - [`S3SegmentStore`](src/main/java/io/github/zznate/vectorstore/storage/S3SegmentStore.java)
   — implements `SegmentStore`. Uploads segment artefacts (`graph.jvec`,
   `ordinals.jsonl`, `header.json`, plus the empty `attributes.jsonl` and
@@ -60,11 +62,18 @@ Tuning guidance:
 - **Raise `vectorstore.storage.block-cache.bytes`** if the working set of
   graph blocks exceeds the budget and the hit rate drops. Headroom is
   cheap; dropping a block costs a cold ranged `GetObject`.
+- **Enable the off-heap L2 tier** with
+  `vectorstore.storage.block-cache.l2.enabled=true` and
+  `vectorstore.storage.block-cache.l2.bytes=<bytes>` for warm workloads
+  whose footprint exceeds the on-heap budget. The L2 tier uses JDK 21
+  FFM arenas (one per cached block); native memory is freed on eviction
+  with no GC dependency.
 - **Tune `block-size` to the graph stride.** Larger blocks amortise
   per-request overhead; smaller blocks waste less when reads are
   fine-grained. 64 KiB is a safe default for JVector's on-disk format.
-- **Hit / miss ratio** is visible on Prometheus via
-  `vectorstore.cache.block.hit` vs `vectorstore.cache.block.miss`.
+- **Hit / miss ratios** by tier are on Prometheus via
+  `vectorstore.cache.{hit,miss,eviction}{tier, cache_name=block}` —
+  watch `tier=l1_heap` and `tier=l2_offheap` to see promotion behaviour.
 
 ## CDI wiring
 
@@ -79,15 +88,16 @@ Tuning guidance:
 
 `%test-local` profile flips the kind to `local`; anything else uses S3.
 
-## Extension points for phase-2 multi-level caching
+## Extension points for further multi-level caching
 
-The block cache is a plain Caffeine `Cache` today; every hot-path
-interaction goes through
-[`BlockCache`](src/main/java/io/github/zznate/vectorstore/storage/cache/BlockCache.java).
-Phase-2 disk / Redis tiers slot in behind the same type — the decorator
-reader only knows about hit / miss, not storage layer. `BlockKey`
-intentionally encodes the full `<bucket>/<key>` so one process-wide cache
-can front multiple buckets without collision.
+`BlockCache` is the tiered façade in front of L1 (heap) and the optional
+L2 (off-heap arena). A future L3 disk tier (NVMe-backed) plugs in behind
+the same `L2Provider` interface from
+[`vector-store-core`](../vector-store-core/README.md), and `BlockCache`
+already promotes-on-read so any new tier inherits the promotion path
+without changing call sites. `BlockKey` intentionally encodes the full
+`<bucket>/<key>` so one process-wide cache can front multiple buckets
+without collision.
 
 ## Dependencies
 

@@ -22,7 +22,7 @@ These five invariants make Phase 2 additive rather than a breaking rewrite. Pres
 
 | Layer | Choice | Notes |
 |-------|--------|-------|
-| Language / JDK | Java 21 LTS | JVector auto-selects its Java 20+ (Panama Vector API) code path via multi-release JAR. Requires `--add-modules=jdk.incubator.vector --enable-native-access=ALL-UNNAMED` at launch. Upgrade to JDK 25 is planned when Quarkus line we pin to explicitly lists 25 support. |
+| Language / JDK | Java 21 LTS | JVector auto-selects its Java 20+ (Panama Vector API) code path via multi-release JAR. Requires `--add-modules=jdk.incubator.vector --enable-native-access=ALL-UNNAMED --enable-preview` at launch — the preview flag unlocks the FFM Arena used by the L2 off-heap cache (final in JDK 22). Upgrade to JDK 25 is planned when the Quarkus line we pin to explicitly lists 25 support; the `--enable-preview` flag drops at that point. |
 | Framework | Quarkus 3.x (latest LTS) | Pin to the current Quarkus LTS at repo-init time. |
 | Build | Maven 3.9+, multi-module | |
 | Index engine | JVector (multi-release JAR artifact) | M=32, beamWidth=200, PQ subspaces=128 as Phase 1 defaults. Per-index override planned. |
@@ -255,7 +255,7 @@ JSON via `quarkus-logging-json`. Trace/span IDs auto-correlated. Log events at I
 ## Launch flags (every profile)
 
 ```
-JAVA_TOOL_OPTIONS="--add-modules=jdk.incubator.vector --enable-native-access=ALL-UNNAMED"
+JAVA_TOOL_OPTIONS="--add-modules=jdk.incubator.vector --enable-native-access=ALL-UNNAMED --enable-preview"
 ```
 
 Configure in:

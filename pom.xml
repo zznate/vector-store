@@ -74,11 +74,14 @@
     <build.helper.plugin.version>3.6.0</build.helper.plugin.version>
 
     <!--
-      JVM flags required by JVector's Panama Vector API code path. Surefire
-      and Failsafe both apply these so tests exercise the SIMD path. Also
-      required at runtime via JAVA_TOOL_OPTIONS / container ENTRYPOINT.
+      JVM flags required by JVector's Panama Vector API code path and by
+      the foreign-memory L2 cache (Arena / MemorySegment). FFM is final
+      in JDK 22 but preview in JDK 21, so the enable-preview flag is
+      needed until we upgrade. Surefire and Failsafe both apply these so
+      tests exercise both the SIMD and FFM paths. Runtime needs the same
+      flags via JAVA_TOOL_OPTIONS / container ENTRYPOINT.
     -->
-    <vectorstore.test.jvm.args>--add-modules=jdk.incubator.vector --enable-native-access=ALL-UNNAMED</vectorstore.test.jvm.args>
+    <vectorstore.test.jvm.args>--add-modules=jdk.incubator.vector --enable-native-access=ALL-UNNAMED --enable-preview</vectorstore.test.jvm.args>
 
     <!-- Skip unnecessary steps in non-app modules by default -->
     <skipITs>false</skipITs>
@@ -253,6 +256,15 @@
           <configuration>
             <release>${maven.compiler.release}</release>
             <parameters>true</parameters>
+            <!--
+              FFM (Arena / MemorySegment) is preview in JDK 21, final in
+              JDK 22. Compiling with the enable-preview flag lets us use
+              the L2 off-heap arena cache today; the same source compiles
+              unchanged once we upgrade and can drop the flag.
+            -->
+            <compilerArgs>
+              <arg>--enable-preview</arg>
+            </compilerArgs>
           </configuration>
         </plugin>
 
