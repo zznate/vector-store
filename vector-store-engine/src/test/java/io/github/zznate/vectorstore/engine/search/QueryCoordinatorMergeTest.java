@@ -121,7 +121,8 @@ class QueryCoordinatorMergeTest {
     CatalogStagedTombstones tombstones =
         new CatalogStagedTombstones(stagedRepo, Clock.fixed(Instant.EPOCH, ZoneOffset.UTC), registry);
 
+    CachePolicyEnforcer enforcer = mock(CachePolicyEnforcer.class);
     return new QueryCoordinator(
-        resolver, searcher, tombstones, loader, compiler, tracer, registry);
+        resolver, searcher, enforcer, tombstones, loader, compiler, tracer, registry);
   }
 }

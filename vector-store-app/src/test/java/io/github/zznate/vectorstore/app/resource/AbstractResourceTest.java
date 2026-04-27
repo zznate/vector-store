@@ -1,9 +1,11 @@
 package io.github.zznate.vectorstore.app.resource;
 
 import io.github.zznate.vectorstore.api.auth.PasswordHasher;
+import io.github.zznate.vectorstore.core.cache.CachePolicyResolver;
 import io.github.zznate.vectorstore.core.catalog.manifest.ManifestCache;
 import io.github.zznate.vectorstore.core.catalog.model.ApiKey;
 import io.github.zznate.vectorstore.core.catalog.repository.ApiKeyRepository;
+import io.github.zznate.vectorstore.engine.search.CachePolicyEnforcer;
 import io.github.zznate.vectorstore.engine.search.SegmentHandleCache;
 import io.restassured.RestAssured;
 import jakarta.inject.Inject;
@@ -34,6 +36,8 @@ public abstract class AbstractResourceTest {
   @Inject protected Clock clock;
   @Inject protected ManifestCache manifestCache;
   @Inject protected SegmentHandleCache segmentHandleCache;
+  @Inject protected CachePolicyResolver cachePolicyResolver;
+  @Inject protected CachePolicyEnforcer cachePolicyEnforcer;
 
   @BeforeAll
   static void disableRestAssuredUrlEncoding() {
@@ -61,6 +65,8 @@ public abstract class AbstractResourceTest {
     // committed state cannot serve stale results to the next.
     manifestCache.invalidateAll();
     segmentHandleCache.invalidateAll();
+    cachePolicyResolver.invalidateAll();
+    cachePolicyEnforcer.invalidateAll();
     apiKeys.create(
         new ApiKey("admin-test", hasher.hash("admin-secret"), null, clock.instant(), null));
     apiKeys.create(

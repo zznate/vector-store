@@ -52,6 +52,7 @@ public class QueryCoordinator {
 
   private final ManifestCache manifests;
   private final Searcher searcher;
+  private final CachePolicyEnforcer cachePolicyEnforcer;
   private final CatalogStagedTombstones tombstones;
   private final SidecarLoader sidecarLoader;
   private final FilterCompiler filterCompiler;
@@ -62,6 +63,7 @@ public class QueryCoordinator {
   public QueryCoordinator(
       ManifestCache manifests,
       Searcher searcher,
+      CachePolicyEnforcer cachePolicyEnforcer,
       CatalogStagedTombstones tombstones,
       SidecarLoader sidecarLoader,
       FilterCompiler filterCompiler,
@@ -69,6 +71,7 @@ public class QueryCoordinator {
       MeterRegistry meterRegistry) {
     this.manifests = manifests;
     this.searcher = searcher;
+    this.cachePolicyEnforcer = cachePolicyEnforcer;
     this.tombstones = tombstones;
     this.sidecarLoader = sidecarLoader;
     this.filterCompiler = filterCompiler;
@@ -92,6 +95,7 @@ public class QueryCoordinator {
       if (active.isEmpty()) {
         return List.of();
       }
+      cachePolicyEnforcer.onQuery(indexId, active);
       Set<String> stagedDenied = tombstones.tombstonedIds(indexId);
       PriorityQueue<Pending> topHeap =
           new PriorityQueue<>(topK, Comparator.comparing(p -> p.hit.score()));

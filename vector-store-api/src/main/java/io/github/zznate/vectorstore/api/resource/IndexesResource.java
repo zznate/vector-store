@@ -8,10 +8,12 @@ import io.github.zznate.vectorstore.api.dto.IndexResponse;
 import io.github.zznate.vectorstore.api.error.BucketNotFoundException;
 import io.github.zznate.vectorstore.api.error.IndexAlreadyExistsException;
 import io.github.zznate.vectorstore.api.error.IndexNotFoundException;
+import io.github.zznate.vectorstore.core.cache.CachePolicyResolver;
 import io.github.zznate.vectorstore.core.catalog.manifest.ManifestCache;
 import io.github.zznate.vectorstore.core.catalog.model.VectorIndex;
 import io.github.zznate.vectorstore.core.catalog.repository.BucketRepository;
 import io.github.zznate.vectorstore.core.catalog.repository.VectorIndexRepository;
+import io.github.zznate.vectorstore.engine.search.CachePolicyEnforcer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.validation.Valid;
@@ -42,6 +44,8 @@ public class IndexesResource {
   private final BucketRepository buckets;
   private final VectorIndexRepository indexes;
   private final ManifestCache manifests;
+  private final CachePolicyResolver cachePolicyResolver;
+  private final CachePolicyEnforcer cachePolicyEnforcer;
   private final Clock clock;
   private final ObjectMapper objectMapper;
 
@@ -50,11 +54,15 @@ public class IndexesResource {
       BucketRepository buckets,
       VectorIndexRepository indexes,
       ManifestCache manifests,
+      CachePolicyResolver cachePolicyResolver,
+      CachePolicyEnforcer cachePolicyEnforcer,
       Clock clock,
       ObjectMapper objectMapper) {
     this.buckets = buckets;
     this.indexes = indexes;
     this.manifests = manifests;
+    this.cachePolicyResolver = cachePolicyResolver;
+    this.cachePolicyEnforcer = cachePolicyEnforcer;
     this.clock = clock;
     this.objectMapper = objectMapper;
   }
@@ -113,6 +121,8 @@ public class IndexesResource {
     }
     indexes.delete(qualifiedId);
     manifests.invalidateIndex(qualifiedId);
+    cachePolicyResolver.invalidate(qualifiedId);
+    cachePolicyEnforcer.invalidateIndex(qualifiedId);
     return Response.noContent().build();
   }
 
