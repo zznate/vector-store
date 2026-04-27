@@ -2,6 +2,7 @@ package io.github.zznate.vectorstore.storage.reader;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.zznate.vectorstore.core.cache.OffHeapArenaL2Provider;
 import io.github.zznate.vectorstore.storage.cache.BlockCache;
 import io.github.zznate.vectorstore.storage.cache.BlockKey;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -127,6 +128,44 @@ class BlockCachingRandomAccessReaderTest {
       Thread.sleep(20);
     }
     assertThat(tinyCache.estimatedSize()).isLessThanOrEqualTo(2);
+  }
+
+  @Test
+  void useL2FalseSkipsOffHeapTierOnReadAndWrite() throws Exception {
+    SimpleMeterRegistry localRegistry = new SimpleMeterRegistry();
+    OffHeapArenaL2Provider l2 =
+        new OffHeapArenaL2Provider(1L << 20, localRegistry, BlockCache.CACHE_NAME);
+    try {
+      BlockCache tieredCache = new BlockCache(1L << 20, localRegistry, l2);
+      try (BlockCachingRandomAccessReader reader =
+          new BlockCachingRandomAccessReader(
+              underlying,
+              OBJECT_KEY,
+              BLOCK_SIZE,
+              objectBytes.length,
+              tieredCache,
+              localRegistry,
+              false)) {
+        reader.seek(0);
+        reader.readFully(new byte[48]); // blocks 0, 1, 2
+      }
+
+      // L1 was populated...
+      assertThat(tieredCache.tier().stats().currentEntries()).isEqualTo(3L);
+      // ...but the L2 tier was bypassed entirely.
+      assertThat(l2.stats().currentEntries()).isZero();
+      // L2 hit / miss counters were never advanced because the L2 tier
+      // was never consulted (the L2 counters exist at zero because the
+      // provider registers them eagerly at construction time).
+      assertThat(localRegistry
+              .counter("vectorstore.cache.hit", "tier", "l2_offheap", "cache_name", "block").count())
+          .isZero();
+      assertThat(localRegistry
+              .counter("vectorstore.cache.miss", "tier", "l2_offheap", "cache_name", "block").count())
+          .isZero();
+    } finally {
+      l2.close();
+    }
   }
 
   @Test

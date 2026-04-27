@@ -118,6 +118,40 @@ class BlockCacheTieredTest {
   }
 
   @Test
+  void useL2FalseSkipsL2OnGet() {
+    BlockCache cache = new BlockCache(1L << 20, registry, l2);
+    BlockKey key = new BlockKey("bucket/index/seg/graph", 11L);
+
+    // Seed only L2.
+    l2.put(BlockCache.toL2Key(key), new byte[] {7, 7, 7});
+    double l2HitsBefore = registry
+        .counter("vectorstore.cache.hit", "tier", "l2_offheap", "cache_name", "block").count();
+
+    byte[] result = cache.getIfPresent(key, false);
+
+    assertThat(result).isNull();
+    // L2 was not consulted, so the L2 hit counter did not advance.
+    assertThat(registry
+            .counter("vectorstore.cache.hit", "tier", "l2_offheap", "cache_name", "block").count())
+        .isEqualTo(l2HitsBefore);
+    // L1 was missed.
+    assertThat(registry
+            .counter("vectorstore.cache.miss", "tier", "l1_heap", "cache_name", "block").count())
+        .isEqualTo(1.0);
+  }
+
+  @Test
+  void useL2FalseSkipsL2OnPut() {
+    BlockCache cache = new BlockCache(1L << 20, registry, l2);
+    BlockKey key = new BlockKey("bucket/index/seg/graph", 12L);
+
+    cache.put(key, new byte[] {1, 2, 3}, false);
+
+    assertThat(cache.tier().stats().currentEntries()).isEqualTo(1L);
+    assertThat(l2.stats().currentEntries()).isZero();
+  }
+
+  @Test
   void l1OnlyConstructorOmitsL2() {
     // Fresh registry so the @BeforeEach L2 instance hasn't already
     // registered its meters under the inspected name+tags.

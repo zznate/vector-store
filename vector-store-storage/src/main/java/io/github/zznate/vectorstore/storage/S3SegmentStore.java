@@ -2,6 +2,8 @@ package io.github.zznate.vectorstore.storage;
 
 import io.github.jbellis.jvector.disk.RandomAccessReader;
 import io.github.jbellis.jvector.disk.ReaderSupplier;
+import io.github.zznate.vectorstore.core.cache.CachePolicy;
+import io.github.zznate.vectorstore.core.cache.CachePolicyResolver;
 import io.github.zznate.vectorstore.core.catalog.model.Segment;
 import io.github.zznate.vectorstore.core.segment.BuiltSegment;
 import io.github.zznate.vectorstore.core.segment.SegmentStore;
@@ -66,6 +68,7 @@ public class S3SegmentStore implements SegmentStore, AutoCloseable {
   private final String bucket;
   private final int blockSize;
   private final BlockCache blockCache;
+  private final CachePolicyResolver cachePolicyResolver;
   private final MeterRegistry meterRegistry;
   private final Tracer tracer;
   private final ConcurrentHashMap<String, ReaderSupplier> graphSuppliers = new ConcurrentHashMap<>();
@@ -74,12 +77,14 @@ public class S3SegmentStore implements SegmentStore, AutoCloseable {
       S3Client s3Client,
       StorageConfig config,
       BlockCache blockCache,
+      CachePolicyResolver cachePolicyResolver,
       MeterRegistry meterRegistry,
       Tracer tracer) {
     this.s3Client = s3Client;
     this.bucket = config.bucket();
     this.blockSize = config.blockCache().blockSize();
     this.blockCache = blockCache;
+    this.cachePolicyResolver = cachePolicyResolver;
     this.meterRegistry = meterRegistry;
     this.tracer = tracer;
   }
@@ -116,8 +121,25 @@ public class S3SegmentStore implements SegmentStore, AutoCloseable {
   @Override
   public ReaderSupplier openGraph(Segment segment) {
     String graphKey = stripTrailingSlash(segment.objectPrefix()) + "/graph.jvec";
+    boolean useL2 = useL2For(segment);
     return graphSuppliers.computeIfAbsent(
-        segment.segmentId(), id -> createSupplier(graphKey));
+        segment.segmentId(), id -> createSupplier(graphKey, useL2));
+  }
+
+  private boolean useL2For(Segment segment) {
+    try {
+      return cachePolicyResolver.policyFor(segment.indexId()) != CachePolicy.MINIMAL;
+    } catch (RuntimeException e) {
+      // Best-effort: if the policy can't be resolved, fall back to the L2
+      // path so we don't accidentally degrade SMART/RESIDENT indexes.
+      if (LOG.isDebugEnabled()) {
+        LOG.debug(
+            "could not resolve cache policy for index {}, defaulting to useL2=true",
+            segment.indexId(),
+            e);
+      }
+      return true;
+    }
   }
 
   @Override
@@ -143,12 +165,13 @@ public class S3SegmentStore implements SegmentStore, AutoCloseable {
     graphSuppliers.clear();
   }
 
-  private ReaderSupplier createSupplier(String objectKey) {
+  private ReaderSupplier createSupplier(String objectKey, boolean useL2) {
     try {
       S3ReaderSupplier inner =
           new S3ReaderSupplier(s3Client, bucket, objectKey, meterRegistry, tracer);
       String cacheKey = bucket + "/" + objectKey;
-      return new BlockCachingReaderSupplier(inner, cacheKey, blockSize, blockCache, meterRegistry);
+      return new BlockCachingReaderSupplier(
+          inner, cacheKey, blockSize, blockCache, meterRegistry, useL2);
     } catch (RuntimeException e) {
       throw new UncheckedIOException(
           new IOException("failed to open S3 reader supplier for " + objectKey, e));
@@ -169,25 +192,28 @@ public class S3SegmentStore implements SegmentStore, AutoCloseable {
     private final int blockSize;
     private final BlockCache blockCache;
     private final MeterRegistry meterRegistry;
+    private final boolean useL2;
 
     BlockCachingReaderSupplier(
         S3ReaderSupplier inner,
         String cacheKey,
         int blockSize,
         BlockCache blockCache,
-        MeterRegistry meterRegistry) {
+        MeterRegistry meterRegistry,
+        boolean useL2) {
       this.inner = inner;
       this.cacheKey = cacheKey;
       this.blockSize = blockSize;
       this.blockCache = blockCache;
       this.meterRegistry = meterRegistry;
+      this.useL2 = useL2;
     }
 
     @Override
     public RandomAccessReader get() {
       S3RandomAccessReader raw = (S3RandomAccessReader) inner.get();
       return new BlockCachingRandomAccessReader(
-          raw, cacheKey, blockSize, inner.objectLength(), blockCache, meterRegistry);
+          raw, cacheKey, blockSize, inner.objectLength(), blockCache, meterRegistry, useL2);
     }
 
     @Override

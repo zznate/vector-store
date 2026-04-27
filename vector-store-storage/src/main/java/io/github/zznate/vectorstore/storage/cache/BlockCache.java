@@ -40,11 +40,20 @@ public final class BlockCache {
   }
 
   public byte[] getIfPresent(BlockKey key) {
+    return getIfPresent(key, true);
+  }
+
+  /**
+   * Look up {@code key}, optionally bypassing the L2 tier. {@code useL2=false}
+   * is the path taken by {@link io.github.zznate.vectorstore.core.cache.CachePolicy#MINIMAL}
+   * indexes, which neither read nor promote off-heap blocks.
+   */
+  public byte[] getIfPresent(BlockKey key, boolean useL2) {
     byte[] hot = tier.get(key).orElse(null);
     if (hot != null) {
       return hot;
     }
-    if (l2 == null) {
+    if (!useL2 || l2 == null) {
       return null;
     }
     byte[] warm = l2.get(toL2Key(key)).orElse(null);
@@ -56,8 +65,18 @@ public final class BlockCache {
   }
 
   public void put(BlockKey key, byte[] block) {
+    put(key, block, true);
+  }
+
+  /**
+   * Insert {@code block} into L1, and into L2 only when {@code useL2} is
+   * {@code true}. {@link io.github.zznate.vectorstore.core.cache.CachePolicy#MINIMAL}
+   * callers pass {@code false} so cold blocks for those indexes never warm
+   * the off-heap tier.
+   */
+  public void put(BlockKey key, byte[] block, boolean useL2) {
     tier.put(key, block);
-    if (l2 != null) {
+    if (useL2 && l2 != null) {
       l2.put(toL2Key(key), block);
     }
   }

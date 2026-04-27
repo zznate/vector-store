@@ -39,10 +39,18 @@ public final class BlockCachingRandomAccessReader implements RandomAccessReader 
   private final long objectLength;
   private final BlockCache cache;
   private final MeterRegistry meterRegistry;
+  private final boolean useL2;
 
   private long position;
   private boolean closed;
 
+  /**
+   * Construct a reader that uses both L1 and L2 of the {@link BlockCache}.
+   * Equivalent to passing {@code useL2 = true} to the seven-arg
+   * constructor; callers for
+   * {@link io.github.zznate.vectorstore.core.cache.CachePolicy#MINIMAL}
+   * indexes should pass {@code useL2 = false} via the seven-arg form.
+   */
   public BlockCachingRandomAccessReader(
       RangeReader underlying,
       String objectKey,
@@ -50,6 +58,17 @@ public final class BlockCachingRandomAccessReader implements RandomAccessReader 
       long objectLength,
       BlockCache cache,
       MeterRegistry meterRegistry) {
+    this(underlying, objectKey, blockSize, objectLength, cache, meterRegistry, true);
+  }
+
+  public BlockCachingRandomAccessReader(
+      RangeReader underlying,
+      String objectKey,
+      int blockSize,
+      long objectLength,
+      BlockCache cache,
+      MeterRegistry meterRegistry,
+      boolean useL2) {
     if (blockSize <= 0) {
       throw new IllegalArgumentException("blockSize must be > 0, got " + blockSize);
     }
@@ -59,6 +78,7 @@ public final class BlockCachingRandomAccessReader implements RandomAccessReader 
     this.objectLength = objectLength;
     this.cache = cache;
     this.meterRegistry = meterRegistry;
+    this.useL2 = useL2;
   }
 
   @Override
@@ -180,7 +200,7 @@ public final class BlockCachingRandomAccessReader implements RandomAccessReader 
 
   private byte[] loadBlock(long blockIndex) throws IOException {
     BlockKey key = new BlockKey(objectKey, blockIndex);
-    byte[] block = cache.getIfPresent(key);
+    byte[] block = cache.getIfPresent(key, useL2);
     if (block != null) {
       long startNanos = System.nanoTime();
       Timer.builder(METER_GET_DURATION)
@@ -203,7 +223,7 @@ public final class BlockCachingRandomAccessReader implements RandomAccessReader 
     }
     byte[] buf = new byte[len];
     underlying.readRange(blockStart, buf, 0, len);
-    cache.put(key, buf);
+    cache.put(key, buf, useL2);
     return buf;
   }
 }
