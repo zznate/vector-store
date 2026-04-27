@@ -16,6 +16,7 @@ API — the object store is an implementation detail.
 | What each module owns and depends on | each `vector-store-*/README.md` (linked below) |
 | Build / run / test mechanics | the [Build](#build), [Run locally](#run-locally), and [Test](#test) sections below |
 | How phases split up | the [Phase plan](#phase-plan) |
+| Pre-PR checks, commit conventions, code style | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
 
 If something in the code disagrees with `docs/design-notes.md`, fix the code —
 the design notes are authoritative.
