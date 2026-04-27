@@ -1,14 +1,18 @@
 package io.github.zznate.vectorstore.core.catalog.model;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.zznate.vectorstore.core.cache.CachePolicy;
 import java.util.Map;
 
 /**
- * Tunable JVector parameters for a given index. Stored as JSON in the
- * {@code vector_index.engine_params} column and consumed by the engine's
- * segment builder at commit time.
+ * Tunable JVector parameters and cache policy for a given index. Stored as
+ * JSON in the {@code vector_index.engine_params} column and consumed by the
+ * engine's segment builder at commit time and by the warm-tier cache policy
+ * enforcer at query time.
  *
  * <p>Defaults come from {@code docs/design-notes.md}. Clients override at
  * index-creation time via the {@code engineParams} field on
@@ -16,7 +20,7 @@ import java.util.Map;
  * and the canonical merged form is persisted so later reads never need to
  * re-apply defaults.
  *
- * <h2>Parameter guidance</h2>
+ * <h2>JVector parameters</h2>
  *
  * All parameters trade recall against build cost and/or memory. Start with
  * defaults and adjust only if a measurement warrants it.
@@ -49,6 +53,17 @@ import java.util.Map;
  *       to {@code false}; set to {@code true} if an index's query profile
  *       favours the HNSW entry-point amortisation.
  * </ul>
+ *
+ * <h2>Cache policy</h2>
+ *
+ * <ul>
+ *   <li><b>{@code cachePolicy}</b> — see {@link CachePolicy}. Defaults to
+ *       {@link CachePolicy#SMART}.
+ *   <li><b>{@code cacheBytes}</b> — optional per-index byte hint. {@code null}
+ *       defers to the global cache budget; a positive value caps how much of
+ *       that budget the index may consume (advisory in Phase 2A; load-bearing
+ *       once isolated arenas land). Negative values are rejected.
+ * </ul>
  */
 public record IndexBuildParams(
     int m,
@@ -57,7 +72,9 @@ public record IndexBuildParams(
     float alpha,
     int pqSubspaces,
     int pqSubspaceClusters,
-    boolean addHierarchy) {
+    boolean addHierarchy,
+    CachePolicy cachePolicy,
+    @JsonInclude(JsonInclude.Include.NON_NULL) Long cacheBytes) {
 
   public IndexBuildParams {
     if (m < 1) {
@@ -80,19 +97,28 @@ public record IndexBuildParams(
       throw new IllegalArgumentException(
           "pqSubspaceClusters must be in [2, 256], got " + pqSubspaceClusters);
     }
+    if (cachePolicy == null) {
+      cachePolicy = CachePolicy.defaultPolicy();
+    }
+    if (cacheBytes != null && cacheBytes < 0) {
+      throw new IllegalArgumentException("cacheBytes must be >= 0 when set, got " + cacheBytes);
+    }
   }
 
   /**
    * Defaults from {@code docs/design-notes.md}: {@code M=32},
    * {@code beamWidth=200}, {@code neighborOverflow=1.2}, {@code alpha=1.2},
    * {@code pqSubspaces=128}, {@code pqSubspaceClusters=256},
-   * {@code addHierarchy=false}.
+   * {@code addHierarchy=false}, {@code cachePolicy=SMART},
+   * {@code cacheBytes=null}.
    */
   public static IndexBuildParams defaults() {
-    return new IndexBuildParams(32, 200, 1.2f, 1.2f, 128, 256, false);
+    return new IndexBuildParams(
+        32, 200, 1.2f, 1.2f, 128, 256, false, CachePolicy.defaultPolicy(), null);
   }
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER =
+      new ObjectMapper().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
   private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
 
   /** Canonical JSON form stored in {@code vector_index.engine_params}. */
