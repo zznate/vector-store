@@ -84,6 +84,12 @@ public class CommitCoordinator {
 
   private final ConcurrentHashMap<String, ReentrantLock> perIndexLocks = new ConcurrentHashMap<>();
 
+  // Eleven CDI-injected collaborators. PMD's ExcessiveParameterList rule is
+  // a code-smell detector for over-broad methods; @Inject constructors are
+  // a different shape — the framework dictates the surface and bundling
+  // deps into a parameter object would hide the count without adding any
+  // real abstraction. Each argument is a distinct, well-named bean.
+  @SuppressWarnings("PMD.ExcessiveParameterList")
   @Inject
   public CommitCoordinator(
       WriteBuffer writeBuffer,

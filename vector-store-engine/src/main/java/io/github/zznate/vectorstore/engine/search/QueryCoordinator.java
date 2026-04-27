@@ -97,53 +97,8 @@ public class QueryCoordinator {
       }
       cachePolicyEnforcer.onQuery(indexId, active);
       Set<String> stagedDenied = tombstones.tombstonedIds(indexId);
-      PriorityQueue<Pending> topHeap =
-          new PriorityQueue<>(topK, Comparator.comparing(p -> p.hit.score()));
-      Map<String, Segment> segmentsById = new HashMap<>();
-      for (Segment segment : active) {
-        segmentsById.put(segment.segmentId(), segment);
-      }
-
-      for (Segment segment : active) {
-        Bits accept = acceptFor(segment, indexId, filter, stagedDenied);
-        if (accept == null) {
-          // Segment has zero vectors under this filter — skip the search
-          // entirely.
-          continue;
-        }
-        List<ScoredOrdinal> perSegment = searcher.search(segment, queryVector, topK, accept);
-        for (ScoredOrdinal hit : perSegment) {
-          Pending pending = new Pending(segment, hit);
-          if (topHeap.size() < topK) {
-            topHeap.offer(pending);
-          } else if (hit.score() > topHeap.peek().hit.score()) {
-            topHeap.poll();
-            topHeap.offer(pending);
-          }
-        }
-      }
-
-      List<Pending> merged = new ArrayList<>(topHeap);
-      merged.sort(Comparator.comparing((Pending p) -> p.hit.score()).reversed());
-
-      List<ScoredHit> enriched = new ArrayList<>(merged.size());
-      Map<String, AttributeSidecar> attrCache = new HashMap<>();
-      for (Pending p : merged) {
-        Map<String, String> attrs;
-        if (p.hit.ordinal() >= 0) {
-          AttributeSidecar sidecar =
-              attrCache.computeIfAbsent(
-                  p.segment.segmentId(), id -> sidecarLoader.attributes(p.segment));
-          attrs =
-              p.hit.ordinal() < sidecar.size()
-                  ? sidecar.attributesOf(p.hit.ordinal())
-                  : Map.of();
-        } else {
-          attrs = Map.of();
-        }
-        enriched.add(new ScoredHit(p.hit.userId(), p.hit.score(), attrs));
-      }
-      return enriched;
+      List<Pending> topResults = fanOutAndMerge(active, queryVector, topK, filter, stagedDenied, indexId);
+      return enrichWithAttributes(topResults);
     } finally {
       Timer.builder("vectorstore.query.duration")
           .description("Wall time of a query fan-out + merge")
@@ -152,6 +107,81 @@ public class QueryCoordinator {
           .record(System.nanoTime() - started, TimeUnit.NANOSECONDS);
       span.end();
     }
+  }
+
+  /**
+   * Search every active segment under the index's accept mask and merge
+   * the per-segment hits into a top-{@code topK} list ordered by score
+   * (descending). Package-private so the merge logic can be exercised in
+   * isolation.
+   */
+  List<Pending> fanOutAndMerge(
+      List<Segment> active,
+      float[] queryVector,
+      int topK,
+      FilterExpr filter,
+      Set<String> stagedDenied,
+      String indexId) {
+    PriorityQueue<Pending> topHeap =
+        new PriorityQueue<>(topK, Comparator.comparing(p -> p.hit.score()));
+    for (Segment segment : active) {
+      Bits accept = acceptFor(segment, indexId, filter, stagedDenied);
+      if (accept == null) {
+        // Segment has zero vectors under this filter — skip the search
+        // entirely.
+        continue;
+      }
+      List<ScoredOrdinal> perSegment = searcher.search(segment, queryVector, topK, accept);
+      offerInto(topHeap, segment, perSegment, topK);
+    }
+    List<Pending> merged = new ArrayList<>(topHeap);
+    merged.sort(Comparator.comparing((Pending p) -> p.hit.score()).reversed());
+    return merged;
+  }
+
+  /**
+   * Push every per-segment hit through a bounded min-heap of size
+   * {@code topK}. Once the heap is full, only hits whose score beats the
+   * current minimum are admitted, so the heap converges to the global
+   * top-k across every segment.
+   */
+  private static void offerInto(
+      PriorityQueue<Pending> topHeap, Segment segment, List<ScoredOrdinal> perSegment, int topK) {
+    for (ScoredOrdinal hit : perSegment) {
+      Pending pending = new Pending(segment, hit);
+      if (topHeap.size() < topK) {
+        topHeap.offer(pending);
+      } else if (hit.score() > topHeap.peek().hit.score()) {
+        topHeap.poll();
+        topHeap.offer(pending);
+      }
+    }
+  }
+
+  /**
+   * Resolve attribute sidecars for the segments that produced the merged
+   * top-k and return user-facing {@link ScoredHit} records. Sidecars are
+   * cached locally so repeated hits from the same segment pay one lookup.
+   * Package-private so the enrichment can be exercised in isolation.
+   */
+  List<ScoredHit> enrichWithAttributes(List<Pending> merged) {
+    List<ScoredHit> enriched = new ArrayList<>(merged.size());
+    Map<String, AttributeSidecar> attrCache = new HashMap<>();
+    for (Pending p : merged) {
+      Map<String, String> attrs = attributesFor(p, attrCache);
+      enriched.add(new ScoredHit(p.hit.userId(), p.hit.score(), attrs));
+    }
+    return enriched;
+  }
+
+  private Map<String, String> attributesFor(Pending p, Map<String, AttributeSidecar> attrCache) {
+    if (p.hit.ordinal() < 0) {
+      return Map.of();
+    }
+    AttributeSidecar sidecar =
+        attrCache.computeIfAbsent(
+            p.segment.segmentId(), id -> sidecarLoader.attributes(p.segment));
+    return p.hit.ordinal() < sidecar.size() ? sidecar.attributesOf(p.hit.ordinal()) : Map.of();
   }
 
   /**

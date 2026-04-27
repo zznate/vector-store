@@ -1,0 +1,70 @@
+<?xml version="1.0"?>
+<ruleset name="vector-store"
+         xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0 https://pmd.sourceforge.net/ruleset_2_0_0.xsd">
+
+  <description>
+    Focused complexity + correctness ruleset for vector-store. Calibrated
+    against the project's small-focused-methods feedback (extract discrete
+    concerns into named helpers; ~30 meaningful lines is a smell), the
+    no-swallow-exceptions feedback (every non-rethrowing catch must log),
+    and the engineering-standards memory (rigorous unit + integration
+    testing, no code duplication, immutable idioms).
+
+    This is intentionally narrow: it gates new code on size and
+    correctness. Style, naming, and design opinion-rules are off — those
+    live in the user's editorial review, not in CI.
+  </description>
+
+  <!-- ============================================================
+       Method / class size gates.
+       ============================================================ -->
+
+  <rule ref="category/java/design.xml/CyclomaticComplexity">
+    <properties>
+      <!-- Methods over 12 paths likely have discrete concerns to extract. -->
+      <property name="methodReportLevel" value="12"/>
+      <!-- Classes are looser; coordinator-shaped classes have multiple methods. -->
+      <property name="classReportLevel" value="80"/>
+    </properties>
+  </rule>
+
+  <rule ref="category/java/design.xml/CognitiveComplexity">
+    <properties>
+      <!-- SonarSource's cognitive metric, more aligned with "is this hard to read". -->
+      <property name="reportLevel" value="15"/>
+    </properties>
+  </rule>
+
+  <rule ref="category/java/design.xml/NcssCount">
+    <properties>
+      <!-- Non-commented source statements per method. ~40 NCSS is roughly 40
+           statements; with whitespace and comments that's well above the
+           ~30 meaningful lines threshold the small-methods rule cares about. -->
+      <property name="methodReportLevel" value="40"/>
+      <property name="classReportLevel" value="500"/>
+    </properties>
+  </rule>
+
+  <rule ref="category/java/design.xml/ExcessiveParameterList">
+    <properties>
+      <property name="minimum" value="8"/>
+    </properties>
+  </rule>
+
+  <!-- ============================================================
+       Correctness rules: directly encode project preferences.
+       ============================================================ -->
+
+  <!-- Enforces feedback_no_swallow_exceptions: empty catch is banned. -->
+  <rule ref="category/java/errorprone.xml/EmptyCatchBlock">
+    <properties>
+      <property name="allowCommentedBlocks" value="false"/>
+    </properties>
+  </rule>
+
+  <!-- PMD 7 consolidates empty if / while / finally / synchronized into one rule. -->
+  <rule ref="category/java/codestyle.xml/EmptyControlStatement"/>
+
+</ruleset>

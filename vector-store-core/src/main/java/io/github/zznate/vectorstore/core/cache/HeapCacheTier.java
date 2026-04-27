@@ -57,28 +57,37 @@ public final class HeapCacheTier<K, V> implements CacheTier<K, V> {
 
     Tags tags = Tags.of(Tag.of(TIER_TAG, TIER_L1_HEAP), Tag.of(CACHE_NAME_TAG, b.cacheName));
 
-    if (b.meterRegistry != null) {
-      this.hitCounter =
-          Counter.builder(METER_HIT)
-              .description("Cache hits tagged by tier and cache name")
-              .tags(tags)
-              .register(b.meterRegistry);
-      this.missCounter =
-          Counter.builder(METER_MISS)
-              .description("Cache misses tagged by tier and cache name")
-              .tags(tags)
-              .register(b.meterRegistry);
-      this.evictionCounter =
-          Counter.builder(METER_EVICTION)
-              .description("Cache evictions tagged by tier and cache name")
-              .tags(tags)
-              .register(b.meterRegistry);
-    } else {
-      this.hitCounter = null;
-      this.missCounter = null;
-      this.evictionCounter = null;
-    }
+    Counter[] counters = registerCounters(b.meterRegistry, tags);
+    this.hitCounter = counters[0];
+    this.missCounter = counters[1];
+    this.evictionCounter = counters[2];
 
+    this.cache = buildCaffeine(b);
+
+    registerGauges(b.meterRegistry, tags);
+  }
+
+  private static Counter[] registerCounters(MeterRegistry meterRegistry, Tags tags) {
+    if (meterRegistry == null) {
+      return new Counter[3];
+    }
+    return new Counter[] {
+      Counter.builder(METER_HIT)
+          .description("Cache hits tagged by tier and cache name")
+          .tags(tags)
+          .register(meterRegistry),
+      Counter.builder(METER_MISS)
+          .description("Cache misses tagged by tier and cache name")
+          .tags(tags)
+          .register(meterRegistry),
+      Counter.builder(METER_EVICTION)
+          .description("Cache evictions tagged by tier and cache name")
+          .tags(tags)
+          .register(meterRegistry),
+    };
+  }
+
+  private Cache<K, V> buildCaffeine(Builder<K, V> b) {
     Caffeine<Object, Object> c = Caffeine.newBuilder();
     if (b.weigher != null && b.maxBytes > 0) {
       ToIntFunction<V> w = b.weigher;
@@ -89,47 +98,54 @@ public final class HeapCacheTier<K, V> implements CacheTier<K, V> {
     Counter localEviction = this.evictionCounter;
     BiConsumer<K, V> userRemovalHook = b.removalHook;
     c.removalListener(
-        (K key, V value, RemovalCause cause) -> {
-          if (value != null && weigher != null) {
-            currentBytes.addAndGet(-weigher.applyAsInt(value));
-          }
-          if (cause.wasEvicted()) {
-            evictions.increment();
-            if (localEviction != null) {
-              localEviction.increment();
-            }
-          }
-          if (userRemovalHook != null && value != null) {
-            try {
-              userRemovalHook.accept(key, value);
-            } catch (RuntimeException e) {
-              // Hook is best-effort; a failing cleanup must not cascade
-              // into cache corruption. Log the failure so the operator
-              // sees the stack trace even though we recover.
-              if (LOG.isWarnEnabled()) {
-                LOG.warn(
-                    "cache \"{}\" removal hook failed for key {}",
-                    cacheName,
-                    key,
-                    e);
-              }
-            }
-          }
-        });
-    this.cache = c.build();
+        (K key, V value, RemovalCause cause) ->
+            onCaffeineRemoval(key, value, cause, localEviction, userRemovalHook));
+    return c.build();
+  }
 
-    if (b.meterRegistry != null) {
-      Gauge.builder(METER_BYTES, currentBytes, AtomicLong::get)
-          .description("Current bytes held by the cache tier")
-          .tags(tags)
-          .strongReference(true)
-          .register(b.meterRegistry);
-      Gauge.builder(METER_ENTRIES, cache, c2 -> c2.estimatedSize())
-          .description("Current entry count held by the cache tier")
-          .tags(tags)
-          .strongReference(true)
-          .register(b.meterRegistry);
+  private void onCaffeineRemoval(
+      K key, V value, RemovalCause cause, Counter localEviction, BiConsumer<K, V> userHook) {
+    if (value != null && weigher != null) {
+      currentBytes.addAndGet(-weigher.applyAsInt(value));
     }
+    if (cause.wasEvicted()) {
+      evictions.increment();
+      if (localEviction != null) {
+        localEviction.increment();
+      }
+    }
+    if (userHook != null && value != null) {
+      runUserRemovalHook(key, value, userHook);
+    }
+  }
+
+  private void runUserRemovalHook(K key, V value, BiConsumer<K, V> userHook) {
+    try {
+      userHook.accept(key, value);
+    } catch (RuntimeException e) {
+      // Hook is best-effort; a failing cleanup must not cascade into
+      // cache corruption. Log so the operator sees the stack trace even
+      // though we recover.
+      if (LOG.isWarnEnabled()) {
+        LOG.warn("cache \"{}\" removal hook failed for key {}", cacheName, key, e);
+      }
+    }
+  }
+
+  private void registerGauges(MeterRegistry meterRegistry, Tags tags) {
+    if (meterRegistry == null) {
+      return;
+    }
+    Gauge.builder(METER_BYTES, currentBytes, AtomicLong::get)
+        .description("Current bytes held by the cache tier")
+        .tags(tags)
+        .strongReference(true)
+        .register(meterRegistry);
+    Gauge.builder(METER_ENTRIES, cache, Cache::estimatedSize)
+        .description("Current entry count held by the cache tier")
+        .tags(tags)
+        .strongReference(true)
+        .register(meterRegistry);
   }
 
   @Override
