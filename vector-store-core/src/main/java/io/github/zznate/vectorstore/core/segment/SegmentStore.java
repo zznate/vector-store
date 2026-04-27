@@ -43,10 +43,10 @@ public interface SegmentStore {
 
   /**
    * Replace a named sidecar file with the given bytes. The graph file is
-   * strictly immutable after commit; mutable sidecars (tombstones today,
-   * potentially more in phase 2) use this path. Implementations write
-   * atomically when feasible, but concurrent commits for the same segment
-   * are the caller's responsibility to serialise.
+   * strictly immutable after commit; mutable sidecars (e.g., the
+   * tombstone bitmap) use this path. Implementations write atomically
+   * when feasible, but concurrent commits for the same segment are the
+   * caller's responsibility to serialise.
    */
   void putSidecar(Segment segment, String fileName, byte[] content) throws IOException;
 }

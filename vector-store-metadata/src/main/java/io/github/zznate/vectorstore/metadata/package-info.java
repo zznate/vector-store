@@ -1,6 +1,5 @@
 /**
- * Per-segment attribute sidecar, tombstone bitmap, and filter compiler.
- *
- * <p>Empty through phase 3. Populated in phase 4 (filters).
+ * Per-segment attribute sidecar, persisted tombstone bitmap, equality
+ * filter compiler, and the shared sidecar cache.
  */
 package io.github.zznate.vectorstore.metadata;

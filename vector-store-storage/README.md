@@ -113,8 +113,6 @@ without collision.
   `ReaderSupplier` interfaces.
 - `software.amazon.awssdk:s3` + `url-connection-client` — AWS SDK v2.
 - `com.github.ben-manes.caffeine:caffeine` — block cache.
-- `org.roaringbitmap:RoaringBitmap` — pinned here for phase-4 tombstones;
-  unused in phase 3 itself.
 - `io.micrometer:micrometer-core` + `io.opentelemetry:opentelemetry-api`
   (both `provided`) — meters and spans.
 

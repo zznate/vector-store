@@ -14,8 +14,8 @@
   <name>vector-store-storage</name>
   <description>
     S3-backed SegmentStore implementation. Owns the AWS SDK v2 S3 client
-    producer, ranged-GET RandomAccessReader, on-heap block cache, and the
-    SegmentStore upload path. Populated in phase 3.
+    producer, ranged-GET RandomAccessReader, the tiered block cache, and
+    the SegmentStore upload path.
   </description>
 
   <dependencies>
@@ -56,12 +56,6 @@
     <dependency>
       <groupId>com.github.ben-manes.caffeine</groupId>
       <artifactId>caffeine</artifactId>
-    </dependency>
-
-    <!-- Pinned for phase 4 tombstones; unused in phase 3 itself. -->
-    <dependency>
-      <groupId>org.roaringbitmap</groupId>
-      <artifactId>RoaringBitmap</artifactId>
     </dependency>
 
     <!-- CDI / MicroProfile Config / Micrometer / OpenTelemetry — supplied

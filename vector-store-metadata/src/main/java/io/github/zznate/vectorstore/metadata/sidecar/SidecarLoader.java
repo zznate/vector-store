@@ -19,9 +19,9 @@ import java.io.UncheckedIOException;
  * the same LRU budget so the process-wide heap footprint stays bounded.
  *
  * <p>Loading is intentionally eager (blocking read of the sidecar bytes)
- * rather than lazy-per-access: phase 1 workloads touch the whole sidecar
- * when they touch anything, so streaming buys nothing and complicates
- * the cache semantics.
+ * rather than lazy-per-access: queries that touch a sidecar typically
+ * touch all of it, so streaming buys nothing and complicates the cache
+ * semantics.
  */
 @ApplicationScoped
 public class SidecarLoader {

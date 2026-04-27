@@ -4,11 +4,11 @@ import java.util.Map;
 
 /**
  * Read-only view over the ordinal &rarr; attributes mapping for one
- * segment. Introduced so the {@link
- * io.github.zznate.vectorstore.metadata.filter.FilterCompiler} can stay
- * unaware of how the sidecar was loaded (JSONL today, columnar / bitmap
- * indexes later). The parsed {@code AttributeSidecar} in phase 4
- * implements this interface; tests wire up hand-built instances directly.
+ * segment. Lets the
+ * {@link io.github.zznate.vectorstore.metadata.filter.FilterCompiler}
+ * stay unaware of how the sidecar was loaded (JSONL today, columnar /
+ * bitmap indexes later). {@code AttributeSidecar} is the production
+ * implementation; tests wire up hand-built instances directly.
  */
 public interface OrdinalAttributes {
 

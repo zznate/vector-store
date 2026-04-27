@@ -20,8 +20,8 @@ import java.util.Map;
  *
  * <p>Ordinals with no attributes are written as {@code "attributes":{}} so
  * the line-count equals the vector count; the reader's "empty map" path is
- * the same as "no line". Keys and values are plain strings in phase 1;
- * typed coercion is a phase-2 concern.
+ * the same as "no line". Keys and values are plain strings; typed coercion
+ * is future work.
  */
 public final class AttributeSidecarWriter {
 
