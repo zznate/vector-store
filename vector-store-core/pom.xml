@@ -81,6 +81,17 @@
       <scope>provided</scope>
     </dependency>
 
+    <!--
+      SmallRye Config provides @ConfigMapping / @WithDefault / @WithName
+      used by CacheConfig. Provided-scope: Quarkus supplies the runtime
+      classes; we only need the annotations at compile time.
+    -->
+    <dependency>
+      <groupId>io.smallrye.config</groupId>
+      <artifactId>smallrye-config</artifactId>
+      <scope>provided</scope>
+    </dependency>
+
     <!-- Tests -->
     <dependency>
       <groupId>org.junit.jupiter</groupId>

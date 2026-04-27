@@ -1,5 +1,6 @@
 package io.github.zznate.vectorstore.core.catalog.manifest;
 
+import io.github.zznate.vectorstore.core.cache.CacheConfig;
 import io.github.zznate.vectorstore.core.cache.HeapCacheTier;
 import io.github.zznate.vectorstore.core.catalog.model.Segment;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -40,8 +41,13 @@ public class ManifestCache {
   private final long versionTtlNanos;
 
   @Inject
-  public ManifestCache(ManifestResolver resolver, MeterRegistry meterRegistry) {
-    this(resolver, meterRegistry, DEFAULT_MAX_ENTRIES, DEFAULT_VERSION_TTL_NANOS);
+  public ManifestCache(
+      ManifestResolver resolver, MeterRegistry meterRegistry, CacheConfig config) {
+    this(
+        resolver,
+        meterRegistry,
+        config.manifest().maxEntries(),
+        config.manifest().versionTtlNanos());
   }
 
   public ManifestCache(

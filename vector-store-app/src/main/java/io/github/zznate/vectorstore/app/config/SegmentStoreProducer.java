@@ -1,5 +1,6 @@
 package io.github.zznate.vectorstore.app.config;
 
+import io.github.zznate.vectorstore.core.cache.CacheConfig;
 import io.github.zznate.vectorstore.core.cache.CachePolicyResolver;
 import io.github.zznate.vectorstore.core.segment.SegmentStore;
 import io.github.zznate.vectorstore.engine.store.LocalSegmentStore;
@@ -50,6 +51,7 @@ public class SegmentStoreProducer {
 
   @jakarta.inject.Inject Instance<S3Client> s3Client;
   @jakarta.inject.Inject Instance<StorageConfig> storageConfig;
+  @jakarta.inject.Inject Instance<CacheConfig> cacheConfig;
   @jakarta.inject.Inject Instance<BlockCache> blockCache;
   @jakarta.inject.Inject Instance<CachePolicyResolver> cachePolicyResolver;
   @jakarta.inject.Inject MeterRegistry meterRegistry;
@@ -85,6 +87,7 @@ public class SegmentStoreProducer {
     return new S3SegmentStore(
         s3Client.get(),
         storageConfig.get(),
+        cacheConfig.get().block().blockSize(),
         blockCache.get(),
         cachePolicyResolver.get(),
         meterRegistry,

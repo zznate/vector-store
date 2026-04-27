@@ -50,7 +50,8 @@ public final class EngineTestHarness implements AutoCloseable {
   private EngineTestHarness(Path root) {
     this.root = root;
     this.store = new LocalSegmentStore(root);
-    this.handles = new SegmentHandleCache(store, tracer, meterRegistry);
+    this.handles =
+        new SegmentHandleCache(store, tracer, meterRegistry, SegmentHandleCache.DEFAULT_MAX_ENTRIES);
     this.builder = new SegmentBuilder(clock, tracer, meterRegistry);
     this.searcher = new SegmentSearcher(handles, indexes, tracer, meterRegistry);
   }

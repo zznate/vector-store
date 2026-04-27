@@ -15,7 +15,7 @@ import java.util.concurrent.TimeUnit;
  * {@link BlockCache}, falling back to a wrapped reader for cold blocks.
  *
  * <p>Every read is split into fixed-size logical blocks (key size:
- * {@code vectorstore.storage.block-cache.block-size}). Hit / miss / eviction
+ * {@code vectorstore.cache.block.block-size}). Hit / miss / eviction
  * accounting lives in the underlying {@link BlockCache} tier and surfaces
  * through {@code vectorstore.cache.hit} / {@code .miss} /
  * {@code .eviction} counters tagged {@code tier=l1_heap} and

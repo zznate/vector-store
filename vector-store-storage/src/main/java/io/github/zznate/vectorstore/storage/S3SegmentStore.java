@@ -76,13 +76,14 @@ public class S3SegmentStore implements SegmentStore, AutoCloseable {
   public S3SegmentStore(
       S3Client s3Client,
       StorageConfig config,
+      int blockSize,
       BlockCache blockCache,
       CachePolicyResolver cachePolicyResolver,
       MeterRegistry meterRegistry,
       Tracer tracer) {
     this.s3Client = s3Client;
     this.bucket = config.bucket();
-    this.blockSize = config.blockCache().blockSize();
+    this.blockSize = blockSize;
     this.blockCache = blockCache;
     this.cachePolicyResolver = cachePolicyResolver;
     this.meterRegistry = meterRegistry;

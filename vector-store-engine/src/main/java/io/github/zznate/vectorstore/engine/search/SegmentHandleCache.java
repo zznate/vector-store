@@ -3,6 +3,7 @@ package io.github.zznate.vectorstore.engine.search;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.jbellis.jvector.disk.ReaderSupplier;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex;
+import io.github.zznate.vectorstore.core.cache.CacheConfig;
 import io.github.zznate.vectorstore.core.cache.HeapCacheTier;
 import io.github.zznate.vectorstore.core.catalog.model.Segment;
 import io.github.zznate.vectorstore.core.segment.SegmentStore;
@@ -72,8 +73,11 @@ public class SegmentHandleCache {
 
   @Inject
   public SegmentHandleCache(
-      SegmentStore segmentStore, Tracer tracer, MeterRegistry meterRegistry) {
-    this(segmentStore, tracer, meterRegistry, DEFAULT_MAX_ENTRIES);
+      SegmentStore segmentStore,
+      Tracer tracer,
+      MeterRegistry meterRegistry,
+      CacheConfig config) {
+    this(segmentStore, tracer, meterRegistry, config.segmentHandle().maxEntries());
   }
 
   public SegmentHandleCache(
