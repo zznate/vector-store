@@ -16,6 +16,8 @@ import io.github.zznate.vectorstore.core.catalog.model.IndexBuildParams;
 import io.github.zznate.vectorstore.core.segment.BuiltSegment;
 import io.github.zznate.vectorstore.engine.buffer.BufferEntry;
 import io.github.zznate.vectorstore.engine.buffer.BufferSnapshot;
+import io.github.zznate.vectorstore.metadata.posting.PostingListConfig;
+import io.github.zznate.vectorstore.metadata.posting.PostingListWriter;
 import io.github.zznate.vectorstore.metadata.sidecar.AttributeSidecarWriter;
 import io.github.zznate.vectorstore.metadata.sidecar.TombstoneSidecar;
 import io.micrometer.core.instrument.DistributionSummary;
@@ -35,7 +37,10 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Builds a segment on local disk from a {@link BufferSnapshot}.
@@ -53,6 +58,11 @@ import java.util.concurrent.TimeUnit;
  *   <li>{@code attributes.jsonl} — one
  *       {@code {"ordinal":N,"attributes":{...}}} per line, populated from
  *       the {@link BufferEntry#attributes()} supplied at ingest.
+ *   <li>{@code postings.bin} — per-{@code (key, value)} posting lists
+ *       built from the same attribute view, written via
+ *       {@link PostingListWriter}. Keys whose distinct-value count
+ *       exceeds {@link PostingListConfig#maxCardinality()} are skipped;
+ *       filters against those keys fall back to scan at query time.
  *   <li>{@code tombstones.roar} — serialised empty {@link
  *       org.roaringbitmap.RoaringBitmap}; the commit coordinator merges
  *       staged deletes into this sidecar (and every prior active
@@ -74,6 +84,8 @@ import java.util.concurrent.TimeUnit;
 @ApplicationScoped
 public class SegmentBuilder {
 
+  private static final Logger LOG = LoggerFactory.getLogger(SegmentBuilder.class);
+
   private static final VectorTypeSupport VTS =
       VectorizationProvider.getInstance().getVectorTypeSupport();
 
@@ -90,12 +102,18 @@ public class SegmentBuilder {
   private final Clock clock;
   private final Tracer tracer;
   private final MeterRegistry meterRegistry;
+  private final PostingListConfig postingListConfig;
 
   @Inject
-  public SegmentBuilder(Clock clock, Tracer tracer, MeterRegistry meterRegistry) {
+  public SegmentBuilder(
+      Clock clock,
+      Tracer tracer,
+      MeterRegistry meterRegistry,
+      PostingListConfig postingListConfig) {
     this.clock = clock;
     this.tracer = tracer;
     this.meterRegistry = meterRegistry;
+    this.postingListConfig = postingListConfig;
   }
 
   /**
@@ -188,11 +206,12 @@ public class SegmentBuilder {
               metric,
               params,
               clock.instant()));
-      List<java.util.Map<String, String>> byOrdinal = new ArrayList<>(snapshot.size());
+      List<Map<String, String>> byOrdinal = new ArrayList<>(snapshot.size());
       for (BufferEntry entry : snapshot.entries()) {
-        byOrdinal.add(entry.attributes() == null ? java.util.Map.of() : entry.attributes());
+        byOrdinal.add(entry.attributes() == null ? Map.of() : entry.attributes());
       }
       AttributeSidecarWriter.write(tempDir.resolve("attributes.jsonl"), byOrdinal);
+      writePostings(tempDir.resolve("postings.bin"), byOrdinal, segmentId, serializeSpan);
       // Empty tombstone bitmap at segment-build time; CommitCoordinator's
       // tombstone pass overwrites this sidecar when staged deletes need to
       // be persisted against this (or any earlier active) segment.
@@ -203,6 +222,22 @@ public class SegmentBuilder {
           .tag("phase", PHASE_SERIALIZE)
           .register(meterRegistry)
           .record(System.nanoTime() - serializeStart, TimeUnit.NANOSECONDS);
+    }
+  }
+
+  private void writePostings(
+      Path target, List<Map<String, String>> byOrdinal, String segmentId, Span span)
+      throws IOException {
+    PostingListWriter.WriteResult result =
+        PostingListWriter.write(target, byOrdinal, postingListConfig.maxCardinality());
+    span.setAttribute("posting_list_bytes", result.bytesWritten());
+    span.setAttribute("posting_list_skipped_keys", (long) result.skippedKeys().size());
+    if (!result.skippedKeys().isEmpty() && LOG.isDebugEnabled()) {
+      LOG.debug(
+          "segment {} skipped posting lists for {} high-cardinality key(s): {}",
+          segmentId,
+          result.skippedKeys().size(),
+          result.skippedKeys());
     }
   }
 

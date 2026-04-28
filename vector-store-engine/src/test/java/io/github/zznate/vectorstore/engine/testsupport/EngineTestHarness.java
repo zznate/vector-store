@@ -13,6 +13,7 @@ import io.github.zznate.vectorstore.engine.build.SegmentBuilder;
 import io.github.zznate.vectorstore.engine.search.SegmentHandleCache;
 import io.github.zznate.vectorstore.engine.search.SegmentSearcher;
 import io.github.zznate.vectorstore.engine.store.LocalSegmentStore;
+import io.github.zznate.vectorstore.metadata.posting.PostingListConfig;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.opentelemetry.api.OpenTelemetry;
@@ -56,7 +57,8 @@ public final class EngineTestHarness implements AutoCloseable {
     this.store = new LocalSegmentStore(root);
     this.handles =
         new SegmentHandleCache(store, tracer, meterRegistry, SegmentHandleCache.DEFAULT_MAX_ENTRIES);
-    this.builder = new SegmentBuilder(clock, tracer, meterRegistry);
+    PostingListConfig postingListConfig = () -> 10_000;
+    this.builder = new SegmentBuilder(clock, tracer, meterRegistry, postingListConfig);
     this.searcher = new SegmentSearcher(handles, indexes, tracer, meterRegistry);
   }
 
