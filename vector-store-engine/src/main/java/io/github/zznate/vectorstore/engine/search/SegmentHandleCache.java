@@ -68,6 +68,15 @@ public class SegmentHandleCache {
   private final SegmentStore segmentStore;
   private final Tracer tracer;
   private final HeapCacheTier<String, SegmentHandle> tier;
+
+  // Per-segment lock objects for single-flight loads. Entries are kept for
+  // the segment's lifetime in the cache and only removed by
+  // {@link #invalidate} / {@link #invalidateAll}; we deliberately do not
+  // remove per-call. The classic "computeIfAbsent + synchronized +
+  // finally remove" idiom has a window where two threads can end up
+  // synchronized on different lock instances for the same id, breaking
+  // mutual exclusion. Per-segment Objects are tiny and the map is bounded
+  // by segment count.
   private final ConcurrentMap<String, Object> loadLocks = new ConcurrentHashMap<>();
   private final ConcurrentMap<String, SegmentHandle> pinned = new ConcurrentHashMap<>();
 
@@ -108,18 +117,14 @@ public class SegmentHandleCache {
       return cached.get();
     }
     Object lock = loadLocks.computeIfAbsent(id, k -> new Object());
-    try {
-      synchronized (lock) {
-        cached = tier.get(id);
-        if (cached.isPresent()) {
-          return cached.get();
-        }
-        SegmentHandle loaded = loadUnderSpan(segment);
-        tier.put(id, loaded);
-        return loaded;
+    synchronized (lock) {
+      cached = tier.get(id);
+      if (cached.isPresent()) {
+        return cached.get();
       }
-    } finally {
-      loadLocks.remove(id, lock);
+      SegmentHandle loaded = loadUnderSpan(segment);
+      tier.put(id, loaded);
+      return loaded;
     }
   }
 
@@ -141,21 +146,17 @@ public class SegmentHandleCache {
       return existing;
     }
     Object lock = loadLocks.computeIfAbsent(id, k -> new Object());
-    try {
-      synchronized (lock) {
-        existing = pinned.get(id);
-        if (existing != null) {
-          return existing;
-        }
-        // Drop any tier copy first so we never hold two OnDiskGraphIndex
-        // instances open against the same segment.
-        tier.invalidate(id);
-        SegmentHandle loaded = loadUnderSpan(segment);
-        pinned.put(id, loaded);
-        return loaded;
+    synchronized (lock) {
+      existing = pinned.get(id);
+      if (existing != null) {
+        return existing;
       }
-    } finally {
-      loadLocks.remove(id, lock);
+      // Drop any tier copy first so we never hold two OnDiskGraphIndex
+      // instances open against the same segment.
+      tier.invalidate(id);
+      SegmentHandle loaded = loadUnderSpan(segment);
+      pinned.put(id, loaded);
+      return loaded;
     }
   }
 
@@ -183,6 +184,7 @@ public class SegmentHandleCache {
   /** Drop the cached handle for {@code segmentId}, closing it. Does not unpin. */
   public void invalidate(String segmentId) {
     tier.invalidate(segmentId);
+    loadLocks.remove(segmentId);
   }
 
   /** Drop every cached handle, closing each one. Also unpins everything. */
@@ -192,6 +194,7 @@ public class SegmentHandleCache {
     }
     pinned.clear();
     tier.invalidateAll();
+    loadLocks.clear();
   }
 
   /** Underlying tier for stats reporting and test assertions. */
