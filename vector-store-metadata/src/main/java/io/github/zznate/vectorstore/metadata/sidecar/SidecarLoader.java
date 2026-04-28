@@ -2,6 +2,7 @@ package io.github.zznate.vectorstore.metadata.sidecar;
 
 import io.github.zznate.vectorstore.core.catalog.model.Segment;
 import io.github.zznate.vectorstore.core.segment.SegmentStore;
+import io.github.zznate.vectorstore.metadata.posting.PostingListReader;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.io.IOException;
@@ -67,11 +68,28 @@ public class SidecarLoader {
     }
   }
 
+  public PostingListReader postings(Segment segment) {
+    String key = SidecarCache.postingsKey(segment.segmentId());
+    CachedSidecar cached = cache.getIfPresent(key);
+    if (cached instanceof PostingListReader reader) {
+      return reader;
+    }
+    try (InputStream in = segmentStore.openSidecar(segment, "postings.bin")) {
+      PostingListReader loaded = PostingListReader.read(in);
+      cache.put(key, loaded);
+      return loaded;
+    } catch (IOException e) {
+      throw new UncheckedIOException(
+          "failed to load postings.bin for segment " + segment.segmentId(), e);
+    }
+  }
+
   /** Drop any cached sidecars for this segment. Used by the commit path
    * after it re-uploads {@code tombstones.roar} so the next query loads
    * the fresh bytes. */
   public void invalidate(Segment segment) {
     cache.invalidate(SidecarCache.attributesKey(segment.segmentId()));
     cache.invalidate(SidecarCache.tombstonesKey(segment.segmentId()));
+    cache.invalidate(SidecarCache.postingsKey(segment.segmentId()));
   }
 }

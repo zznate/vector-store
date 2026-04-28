@@ -1,5 +1,6 @@
 package io.github.zznate.vectorstore.metadata.posting;
 
+import io.github.zznate.vectorstore.metadata.sidecar.CachedSidecar;
 import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
@@ -26,11 +27,12 @@ import org.roaringbitmap.RoaringBitmap;
  * hashtable miss away from the bitmap bytes; bitmap deserialisation
  * itself stays lazy.
  *
- * <p>Slice 3 wraps this reader in a {@code CachedSidecar} so the parsed
- * structure is shared across queries; the public API on this class
- * stays stable across that change.
+ * <p>Implements {@link CachedSidecar} so the parsed structure shares
+ * the byte-weighted budget with attribute and tombstone sidecars; the
+ * cache key lives at {@link
+ * io.github.zznate.vectorstore.metadata.sidecar.SidecarCache#postingsKey(String)}.
  */
-public final class PostingListReader {
+public final class PostingListReader implements CachedSidecar {
 
   private final byte[] bytes;
   private final Map<TermKey, IndexEntry> entries;
@@ -146,6 +148,7 @@ public final class PostingListReader {
   }
 
   /** Total bytes the reader is holding (including unparsed bitmap bytes). */
+  @Override
   public long sizeBytes() {
     return bytes.length;
   }

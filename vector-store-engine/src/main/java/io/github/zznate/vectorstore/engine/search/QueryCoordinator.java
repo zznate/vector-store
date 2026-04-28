@@ -7,6 +7,7 @@ import io.github.zznate.vectorstore.engine.tombstone.CatalogStagedTombstones;
 import io.github.zznate.vectorstore.metadata.filter.FilterCompiler;
 import io.github.zznate.vectorstore.metadata.filter.FilterExpr;
 import io.github.zznate.vectorstore.metadata.filter.RoaringBitsAdapter;
+import io.github.zznate.vectorstore.metadata.posting.PostingListReader;
 import io.github.zznate.vectorstore.metadata.sidecar.AttributeSidecar;
 import io.github.zznate.vectorstore.metadata.sidecar.SidecarLoader;
 import io.github.zznate.vectorstore.metadata.sidecar.TombstoneSidecar;
@@ -213,7 +214,12 @@ public class QueryCoordinator {
       }
     } else {
       AttributeSidecar sidecar = sidecarLoader.attributes(segment);
-      accept = filterCompiler.compile(filter, sidecar, indexId, segment.segmentId()).bitmap().clone();
+      PostingListReader postings = sidecarLoader.postings(segment);
+      accept =
+          filterCompiler
+              .compile(filter, sidecar, postings, indexId, segment.segmentId())
+              .bitmap()
+              .clone();
     }
     if (hasDeny) {
       RoaringBitmap deny = persistedTombstones.bitmap().clone();

@@ -36,6 +36,10 @@ public final class SidecarCache {
     return segmentId + ":tombstones";
   }
 
+  public static String postingsKey(String segmentId) {
+    return segmentId + ":postings";
+  }
+
   public CachedSidecar getIfPresent(String key) {
     return tier.get(key).orElse(null);
   }
