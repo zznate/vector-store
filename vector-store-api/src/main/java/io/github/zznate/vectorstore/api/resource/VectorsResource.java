@@ -9,6 +9,7 @@ import io.github.zznate.vectorstore.api.dto.QueryResponse;
 import io.github.zznate.vectorstore.api.dto.StatsResponse;
 import io.github.zznate.vectorstore.api.dto.VectorInput;
 import io.github.zznate.vectorstore.api.dto.VectorLookupResponse;
+import io.github.zznate.vectorstore.api.error.AmbiguousFilterHttpException;
 import io.github.zznate.vectorstore.api.error.DimensionMismatchException;
 import io.github.zznate.vectorstore.api.error.IndexNotFoundException;
 import io.github.zznate.vectorstore.api.error.UnsupportedFilterOperatorHttpException;
@@ -22,6 +23,7 @@ import io.github.zznate.vectorstore.engine.search.QueryCoordinator;
 import io.github.zznate.vectorstore.engine.search.ScoredHit;
 import io.github.zznate.vectorstore.engine.search.Searcher;
 import io.github.zznate.vectorstore.engine.tombstone.CatalogStagedTombstones;
+import io.github.zznate.vectorstore.metadata.filter.AmbiguousFilterException;
 import io.github.zznate.vectorstore.metadata.filter.FilterExpr;
 import io.github.zznate.vectorstore.metadata.filter.FilterParser;
 import io.github.zznate.vectorstore.metadata.filter.UnsupportedFilterOperatorException;
@@ -117,6 +119,8 @@ public class VectorsResource {
       filter = FilterParser.parse(request.filter());
     } catch (UnsupportedFilterOperatorException e) {
       throw new UnsupportedFilterOperatorHttpException(e.key(), e.operator());
+    } catch (AmbiguousFilterException e) {
+      throw new AmbiguousFilterHttpException(e.operator(), e.siblings());
     }
 
     List<ScoredHit> hits =

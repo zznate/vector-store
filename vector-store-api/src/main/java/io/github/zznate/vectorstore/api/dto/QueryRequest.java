@@ -7,11 +7,13 @@ import jakarta.validation.constraints.Size;
 import java.util.Map;
 
 /**
- * kNN query request. {@code filter} is optional; when present, every
- * value must be a plain string (phase-1 equality grammar). Nested maps,
- * arrays, numbers, or booleans are rejected with {@code 400
- * unsupported_operator} — phase 2 extends the grammar with {@code $in},
- * {@code $or}, and range operators.
+ * kNN query request. {@code filter} is optional; when present it follows
+ * the grammar parsed by {@link io.github.zznate.vectorstore.metadata.filter.FilterParser}
+ * — equality leaves, {@code $in} set membership, {@code $or}, {@code $not},
+ * and implicit AND of sibling keys. Range operators ({@code $gt}, {@code $lt},
+ * {@code $gte}, {@code $lte}, {@code $between}) and non-string scalar values
+ * are rejected with {@code 400 unsupported_operator}; top-level {@code $or}
+ * mixed with sibling keys is rejected with {@code 400 bad_request}.
  */
 public record QueryRequest(
     @NotNull @Size(min = 1) float[] vector,

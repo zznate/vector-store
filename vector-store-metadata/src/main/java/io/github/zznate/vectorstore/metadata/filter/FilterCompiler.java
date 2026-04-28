@@ -14,11 +14,11 @@ import org.roaringbitmap.RoaringBitmap;
 
 /**
  * Compiles a {@link FilterExpr} against one segment's {@link
- * OrdinalAttributes} view into a {@link RoaringBitsAdapter}. Phase 1 is a
- * brute-force scan: every ordinal is evaluated; matches are recorded in a
- * {@link RoaringBitmap}. Phase 2 will pre-compute per-attribute posting
- * lists at segment build time and replace the scan with bitmap
- * intersections — this type's public contract is stable.
+ * OrdinalAttributes} view into a {@link RoaringBitsAdapter}. Implementation
+ * is a brute-force ordinal scan: every ordinal is evaluated against the
+ * AST; matches are recorded in a {@link RoaringBitmap}. A posting-list
+ * strategy will replace the scan when the per-segment posting-list sidecar
+ * is available; the public contract is stable across that change.
  *
  * <p>Every compile is wrapped in a {@code vectorstore.filter.compile} span
  * and its duration recorded on {@code vectorstore.filter.compile.duration},
@@ -96,6 +96,10 @@ public class FilterCompiler {
   private static boolean evaluate(FilterExpr expr, Map<String, String> attrs) {
     return switch (expr) {
       case FilterExpr.Equals eq -> eq.value().equals(attrs.get(eq.key()));
+      case FilterExpr.In in -> {
+        String value = attrs.get(in.key());
+        yield value != null && in.values().contains(value);
+      }
       case FilterExpr.And and -> {
         for (FilterExpr term : and.terms()) {
           if (!evaluate(term, attrs)) {
@@ -104,6 +108,15 @@ public class FilterCompiler {
         }
         yield true;
       }
+      case FilterExpr.Or or -> {
+        for (FilterExpr term : or.terms()) {
+          if (evaluate(term, attrs)) {
+            yield true;
+          }
+        }
+        yield false;
+      }
+      case FilterExpr.Not not -> !evaluate(not.term(), attrs);
     };
   }
 

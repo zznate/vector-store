@@ -1,11 +1,11 @@
 # vector-store-metadata
 
-Per-segment attribute sidecar, persisted tombstone bitmap, equality-filter
-compiler, and the shared sidecar cache. See the
-[repo root README](../README.md) and
-[`docs/design-notes.md`](../docs/design-notes.md) for the filter grammar
-and the invariants that "attributes live in a sidecar, not inside the
-graph file" and "deletes are tombstone bits".
+Per-segment attribute sidecar, persisted tombstone bitmap, filter
+compiler (equality, `$in`, `$or`, `$not`, implicit AND), and the shared
+sidecar cache. See the [repo root README](../README.md) and
+[`docs/design-notes.md`](../docs/design-notes.md) for the invariants
+that "attributes live in a sidecar, not inside the graph file" and
+"deletes are tombstone bits".
 
 ## Role
 
@@ -24,10 +24,11 @@ Packages under `io.github.zznate.vectorstore.metadata`:
 - [`filter/`](src/main/java/io/github/zznate/vectorstore/metadata/filter) —
   | Type | Role |
   |---|---|
-  | `FilterExpr` | Sealed AST: `Equals(key, value)` and `And(List<FilterExpr>)`. Nothing else is expressible in phase 1. |
-  | `FilterParser` | Translates the wire-level `Map<String, Object>` from `QueryRequest.filter` into a `FilterExpr`. Rejects non-string values with `UnsupportedFilterOperatorException`. |
+  | `FilterExpr` | Sealed AST: `Equals(key, value)`, `In(key, values)`, `And(terms)`, `Or(terms)`, `Not(term)`. |
+  | `FilterParser` | Translates the wire-level `Map<String, Object>` from `QueryRequest.filter` into a `FilterExpr`. Recognises top-level `$or` (sole key), top-level `$not` (may sit alongside siblings), and `$in` as a leaf operator on a key. Multiple sibling keys imply implicit AND. Rejects non-string values, range operators, and unknown operators. |
   | `UnsupportedFilterOperatorException` | Plain-Java exception carrying the offending key and operator. The API layer wraps it in a `400 unsupported_operator` response. |
-  | `FilterCompiler` | `FilterExpr + OrdinalAttributes -> RoaringBitsAdapter`. Brute-force ordinal scan in phase 1; a phase-2 reimplementation will swap to bitmap intersections over pre-built posting lists without touching the signature. Emits the `vectorstore.filter.compile.duration` histogram (tagged `index_id`, `term_count`, `result_ratio_bucket`) and the `vectorstore.filter.compile` span. |
+  | `AmbiguousFilterException` | Plain-Java exception raised when an operator's precedence is ambiguous given its siblings (today: top-level `$or` mixed with sibling keys). The API layer wraps it in a `400 bad_request` response. |
+  | `FilterCompiler` | `FilterExpr + OrdinalAttributes -> RoaringBitsAdapter`. Brute-force ordinal scan; a posting-list strategy will replace the scan when the per-segment posting-list sidecar is present, without changing the signature. Emits the `vectorstore.filter.compile.duration` histogram (tagged `index_id`, `term_count`, `result_ratio_bucket`) and the `vectorstore.filter.compile` span. |
   | `RoaringBitsAdapter` | Adapts a `RoaringBitmap` to JVector's `Bits` interface so the compiled mask feeds `GraphSearcher.search` directly. |
 
 - [`sidecar/`](src/main/java/io/github/zznate/vectorstore/metadata/sidecar) —
@@ -45,20 +46,29 @@ Cache budget is read from
 in `vector-store-core` — see the [Sidecar cache sizing](#sidecar-cache-sizing)
 section below for the property keys.
 
-## Phase 1 filter semantics
+## Filter semantics
 
-- Values are strings on the wire. Numbers, booleans, arrays, and objects
-  are all rejected at parse time.
-- Nested `{"key": {"$op": ...}}` shapes surface as
-  `unsupported_operator` errors naming the operator (`$in`, `$or`, range
-  operators all land here). The rejection path is deliberately explicit
-  so phase-2 grammar additions slot in as new parse branches rather than
-  as a semantic change to the type.
-- Missing attributes never match. There is no `IS NULL` operator.
-- A `null` / empty filter returns `null` from the parser and the compiler
-  short-circuits to an "accept every ordinal" bitmap; with no tombstones
-  the query coordinator further short-circuits to `Bits.ALL` so the
-  common case allocates nothing.
+### Wire format
+
+| Shape | AST |
+|---|---|
+| `{"k": "v"}` | `Equals("k", "v")` |
+| `{"k1": "v1", "k2": "v2"}` | `And([Equals("k1","v1"), Equals("k2","v2")])` (implicit AND of sibling keys) |
+| `{"k": {"$in": ["a","b"]}}` | `In("k", {"a","b"})` |
+| `{"$or": [doc, doc, ...]}` | `Or([parse(doc), ...])` — must be the sole top-level key |
+| `{"$not": doc, ...siblings}` | `Not(parse(doc))` — may mix with sibling equality keys |
+
+### Rejection rules
+
+- Numbers, booleans, arrays at a leaf, and `null` values raise `400 unsupported_operator`.
+- Range operators (`$gt`, `$lt`, `$gte`, `$lte`, `$between`) and any other unrecognised `$`-prefixed operator raise `400 unsupported_operator` naming the offending operator.
+- Top-level `$or` mixed with any sibling keys raises `400 bad_request` with the `bad_request` error code (ambiguous precedence — nest siblings inside the disjunction's clauses or remove them).
+- `$in` may be combined with sibling keys (it is a leaf) but the operator envelope must contain `$in` alone — mixing `$in` with another leaf operator raises `400 unsupported_operator`.
+
+### Other invariants
+
+- Missing attributes never match `Equals` or `In` (there is no `IS NULL` operator). `Not(Equals(k, v))` therefore accepts ordinals that do not carry the key.
+- A `null` / empty filter returns `null` from the parser and the compiler short-circuits to an "accept every ordinal" bitmap; with no tombstones the query coordinator further short-circuits to `Bits.ALL` so the common case allocates nothing.
 
 ## Sidecar cache behaviour
 
@@ -93,17 +103,17 @@ notes live here:
 - `io.micrometer:micrometer-core` + `io.opentelemetry:opentelemetry-api`
   (both `provided`).
 
-## Phase-2 extension plan
+## Future work
 
 - **Per-attribute posting lists** generated at segment build time. The
-  `FilterCompiler` interface stays put; the implementation switches from
-  ordinal scan to `bitmap.and(postingList(key, value))`. Expected to
-  close the recall gap on restrictive filters — the phase-4 integration
-  test deliberately documents the floor its brute-force scan produces on
-  random Gaussian vectors.
-- **Richer grammar**: `$in`, `$or`, range operators on numeric
-  attributes. New parse branches in `FilterParser`; `FilterExpr` gains
-  new sealed variants.
+  `FilterCompiler` signature stays put; the implementation switches from
+  ordinal scan to recursive bitmap operations over pre-built posting
+  lists, narrowing candidates before graph search rather than filtering
+  the search output. Closes the recall gap on restrictive filters
+  documented in the engine module's filtered-recall integration test.
+- **Range operators on numeric attributes** (`$gt`, `$lt`, `$gte`,
+  `$lte`, `$between`). Requires the attribute type system below; new
+  `FilterExpr.Range` sealed variant; rejected by the parser today.
 - **Attribute type system** beyond strings. Requires a schema carried on
   the index or negotiated at write time.
 - **Multi-tier sidecar cache**: an `L2Provider` behind the heap tier

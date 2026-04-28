@@ -233,7 +233,7 @@ class FilterAndTombstoneIT extends AbstractResourceTest {
     createIndex(indexName);
 
     String body =
-        "{\"vector\":[" + zeros(DIM) + "],\"topK\":5,\"filter\":{\"category\":{\"$in\":[\"A\"]}}}";
+        "{\"vector\":[" + zeros(DIM) + "],\"topK\":5,\"filter\":{\"price\":{\"$gt\":5}}}";
     given()
         .header(ApiKeyAuthenticationFilter.HEADER, ADMIN_TOKEN)
         .contentType(ContentType.JSON)
@@ -243,8 +243,8 @@ class FilterAndTombstoneIT extends AbstractResourceTest {
         .then()
         .statusCode(400)
         .body("error", org.hamcrest.Matchers.is("unsupported_operator"))
-        .body("message", org.hamcrest.Matchers.containsString("category"))
-        .body("message", org.hamcrest.Matchers.containsString("$in"));
+        .body("message", org.hamcrest.Matchers.containsString("price"))
+        .body("message", org.hamcrest.Matchers.containsString("$gt"));
   }
 
   // ------------------------------------------------------------------

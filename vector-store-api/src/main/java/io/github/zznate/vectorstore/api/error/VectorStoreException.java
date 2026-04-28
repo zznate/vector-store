@@ -10,7 +10,8 @@ import jakarta.ws.rs.core.Response.Status;
  * <p>Sealed so the set of error outcomes is closed and visible in one place.
  */
 public sealed class VectorStoreException extends RuntimeException
-    permits BucketAlreadyExistsException,
+    permits AmbiguousFilterHttpException,
+        BucketAlreadyExistsException,
         BucketNotEmptyException,
         BucketNotFoundException,
         CommitFailedHttpException,

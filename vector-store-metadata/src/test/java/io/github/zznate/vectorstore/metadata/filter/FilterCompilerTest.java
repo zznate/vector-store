@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -134,6 +135,127 @@ class FilterCompilerTest {
     assertThat(FilterCompiler.bucketFor(100, 75)).isEqualTo("75-100");
     assertThat(FilterCompiler.bucketFor(100, 100)).isEqualTo("75-100");
     assertThat(FilterCompiler.bucketFor(0, 0)).isEqualTo("0-25");
+  }
+
+  @Test
+  void inMatchesAnyValueInTheSet() {
+    OrdinalAttributes attrs =
+        fixed(
+            6,
+            ordinal -> Map.of("category", ordinal % 3 == 0 ? "A" : ordinal % 3 == 1 ? "B" : "C"));
+
+    RoaringBitsAdapter bits =
+        compiler.compile(
+            new FilterExpr.In("category", Set.of("A", "C")), attrs, INDEX_ID, SEGMENT_ID);
+    assertThat(bits.bitmap().getCardinality()).isEqualTo(4);
+    assertThat(bits.get(0)).isTrue(); // A
+    assertThat(bits.get(1)).isFalse(); // B
+    assertThat(bits.get(2)).isTrue(); // C
+    assertThat(bits.get(3)).isTrue(); // A
+    assertThat(bits.get(4)).isFalse(); // B
+    assertThat(bits.get(5)).isTrue(); // C
+  }
+
+  @Test
+  void inWithMissingAttributeDoesNotMatch() {
+    OrdinalAttributes attrs =
+        fixed(3, ordinal -> ordinal == 0 ? Map.of("category", "A") : Map.of());
+    RoaringBitsAdapter bits =
+        compiler.compile(
+            new FilterExpr.In("category", Set.of("A", "B")), attrs, INDEX_ID, SEGMENT_ID);
+    assertThat(bits.bitmap().getCardinality()).isEqualTo(1);
+    assertThat(bits.get(0)).isTrue();
+    assertThat(bits.get(1)).isFalse();
+  }
+
+  @Test
+  void orUnionsMatches() {
+    OrdinalAttributes attrs =
+        fixed(
+            5,
+            ordinal -> Map.of("category", ordinal == 0 ? "A" : ordinal == 1 ? "B" : "C"));
+
+    FilterExpr expr =
+        new FilterExpr.Or(
+            List.of(
+                new FilterExpr.Equals("category", "A"),
+                new FilterExpr.Equals("category", "B")));
+    RoaringBitsAdapter bits = compiler.compile(expr, attrs, INDEX_ID, SEGMENT_ID);
+    assertThat(bits.bitmap().getCardinality()).isEqualTo(2);
+    assertThat(bits.get(0)).isTrue();
+    assertThat(bits.get(1)).isTrue();
+    assertThat(bits.get(2)).isFalse();
+  }
+
+  @Test
+  void notInvertsAgainstFullDomain() {
+    OrdinalAttributes attrs =
+        fixed(
+            4,
+            ordinal -> Map.of("category", ordinal % 2 == 0 ? "A" : "B"));
+
+    RoaringBitsAdapter bits =
+        compiler.compile(
+            new FilterExpr.Not(new FilterExpr.Equals("category", "A")),
+            attrs,
+            INDEX_ID,
+            SEGMENT_ID);
+    assertThat(bits.bitmap().getCardinality()).isEqualTo(2);
+    assertThat(bits.get(0)).isFalse();
+    assertThat(bits.get(1)).isTrue();
+    assertThat(bits.get(2)).isFalse();
+    assertThat(bits.get(3)).isTrue();
+  }
+
+  @Test
+  void notOfMissingAttributeAcceptsOrdinal() {
+    OrdinalAttributes attrs =
+        fixed(3, ordinal -> ordinal == 0 ? Map.of("category", "A") : Map.of());
+    RoaringBitsAdapter bits =
+        compiler.compile(
+            new FilterExpr.Not(new FilterExpr.Equals("category", "A")),
+            attrs,
+            INDEX_ID,
+            SEGMENT_ID);
+    assertThat(bits.bitmap().getCardinality()).isEqualTo(2);
+    assertThat(bits.get(0)).isFalse();
+    assertThat(bits.get(1)).isTrue();
+    assertThat(bits.get(2)).isTrue();
+  }
+
+  @Test
+  void mixedOrInAndNotAgreesWithBruteForceReference() {
+    int n = 200;
+    OrdinalAttributes attrs =
+        fixed(
+            n,
+            ordinal ->
+                Map.of(
+                    "category", ordinal % 3 == 0 ? "A" : ordinal % 3 == 1 ? "B" : "C",
+                    "region", ordinal % 2 == 0 ? "us" : "eu"));
+
+    FilterExpr expr =
+        new FilterExpr.And(
+            List.of(
+                new FilterExpr.Or(
+                    List.of(
+                        new FilterExpr.In("category", Set.of("A", "B")),
+                        new FilterExpr.Equals("region", "eu"))),
+                new FilterExpr.Not(new FilterExpr.Equals("category", "C"))));
+    RoaringBitsAdapter bits = compiler.compile(expr, attrs, INDEX_ID, SEGMENT_ID);
+
+    for (int i = 0; i < n; i++) {
+      Map<String, String> row = attrs.attributesOf(i);
+      String category = row.get("category");
+      String region = row.get("region");
+      boolean inAB = "A".equals(category) || "B".equals(category);
+      boolean euRegion = "eu".equals(region);
+      boolean notC = !"C".equals(category);
+      boolean expected = (inAB || euRegion) && notC;
+      assertThat(bits.get(i))
+          .as("bit %d should match brute-force reference", i)
+          .isEqualTo(expected);
+    }
   }
 
   @Test
