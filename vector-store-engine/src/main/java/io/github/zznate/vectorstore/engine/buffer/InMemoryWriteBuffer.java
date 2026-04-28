@@ -37,6 +37,11 @@ public class InMemoryWriteBuffer implements WriteBuffer {
     return p.snapshotAndClear(indexId);
   }
 
+  @Override
+  public void invalidateIndex(String indexId) {
+    buffers.remove(indexId);
+  }
+
   private static final class PerIndex {
 
     private final ReentrantLock lock = new ReentrantLock();

@@ -12,6 +12,8 @@ import io.github.zznate.vectorstore.core.catalog.manifest.ManifestCache;
 import io.github.zznate.vectorstore.core.catalog.model.VectorIndex;
 import io.github.zznate.vectorstore.core.catalog.repository.BucketRepository;
 import io.github.zznate.vectorstore.core.catalog.repository.VectorIndexRepository;
+import io.github.zznate.vectorstore.engine.buffer.WriteBuffer;
+import io.github.zznate.vectorstore.engine.commit.CommitCoordinator;
 import io.github.zznate.vectorstore.engine.search.CachePolicyEnforcer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -45,9 +47,12 @@ public class IndexesResource {
   private final ManifestCache manifests;
   private final CachePolicyResolver cachePolicyResolver;
   private final CachePolicyEnforcer cachePolicyEnforcer;
+  private final WriteBuffer writeBuffer;
+  private final CommitCoordinator commitCoordinator;
   private final Clock clock;
   private final ObjectMapper objectMapper;
 
+  @SuppressWarnings("PMD.ExcessiveParameterList")
   @Inject
   public IndexesResource(
       BucketRepository buckets,
@@ -55,6 +60,8 @@ public class IndexesResource {
       ManifestCache manifests,
       CachePolicyResolver cachePolicyResolver,
       CachePolicyEnforcer cachePolicyEnforcer,
+      WriteBuffer writeBuffer,
+      CommitCoordinator commitCoordinator,
       Clock clock,
       ObjectMapper objectMapper) {
     this.buckets = buckets;
@@ -62,6 +69,8 @@ public class IndexesResource {
     this.manifests = manifests;
     this.cachePolicyResolver = cachePolicyResolver;
     this.cachePolicyEnforcer = cachePolicyEnforcer;
+    this.writeBuffer = writeBuffer;
+    this.commitCoordinator = commitCoordinator;
     this.clock = clock;
     this.objectMapper = objectMapper;
   }
@@ -122,6 +131,8 @@ public class IndexesResource {
     manifests.invalidateIndex(qualifiedId);
     cachePolicyResolver.invalidate(qualifiedId);
     cachePolicyEnforcer.invalidateIndex(qualifiedId);
+    writeBuffer.invalidateIndex(qualifiedId);
+    commitCoordinator.invalidateIndex(qualifiedId);
     return Response.noContent().build();
   }
 

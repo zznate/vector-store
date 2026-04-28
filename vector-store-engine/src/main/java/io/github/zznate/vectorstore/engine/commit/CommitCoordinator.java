@@ -136,6 +136,21 @@ public class CommitCoordinator {
     }
   }
 
+  /**
+   * Drop the per-index commit lock for {@code indexId}. Called when an
+   * index is deleted so the {@code perIndexLocks} map does not grow
+   * monotonically with every index ever created. No-op if the index has
+   * never been committed.
+   *
+   * <p>Safe to call concurrently with a commit only when the index has
+   * already been deleted from the catalog (no future commit can reach
+   * this entry); otherwise a concurrent commit would re-create the
+   * mapping immediately, defeating the cleanup.
+   */
+  public void invalidateIndex(String indexId) {
+    perIndexLocks.remove(indexId);
+  }
+
   private CommitOutcome commitLocked(VectorIndex index) throws CommitFailedException {
     BufferSnapshot snapshot = writeBuffer.snapshotAndClear(index.indexId());
     if (snapshot.isEmpty()) {

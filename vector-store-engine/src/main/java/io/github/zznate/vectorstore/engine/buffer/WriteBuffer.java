@@ -32,4 +32,11 @@ public interface WriteBuffer {
    * buffer was already empty.
    */
   BufferSnapshot snapshotAndClear(String indexId);
+
+  /**
+   * Drop {@code indexId}'s buffer entirely. Called when an index is
+   * deleted so the per-index map does not retain entries for indexes
+   * that no longer exist. No-op if the index has no buffer.
+   */
+  void invalidateIndex(String indexId);
 }
