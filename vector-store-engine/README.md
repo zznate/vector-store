@@ -176,12 +176,32 @@ persisted as JSON in `vector_index.engine_params`.
 
 Every parameter is settable per-index at creation time. Tuning advice:
 
-- Start with defaults. They hit 17/20 top-1 on the recall fixture.
+- Start with defaults. They hit 18/20 top-1 on the recall fixture.
 - If recall drops: raise `beamWidth` first (100 → 300 → 500), then `m`.
 - If build is slow: lower `beamWidth` before `m` (recall loss is smaller).
 - If memory per segment matters: lower `m`.
 - Switch `addHierarchy` to `true` if the index will be queried with
   extreme top-k values where HNSW's entry-point amortisation helps.
+
+### Parameter sweep
+
+[`IndexBuildParamSweepTest`](src/test/java/io/github/zznate/vectorstore/engine/build/IndexBuildParamSweepTest.java)
+is the canonical place to evaluate a new corner of the parameter space.
+It builds one segment per `IndexBuildParams` variant from the Wikipedia
++ MiniLM-L6-v2 recall fixture, runs the 20 fixture queries, and prints a
+comparison table to stdout (recall, build wall time, on-disk size).
+Adding a corner is a one-line append to `corners()`.
+
+Tagged `@Tag("paramsweep")` so it can be excluded if a future iteration
+makes it slow; today it runs in under two seconds for six corners and
+ships with `mvn test`.
+
+Current data on the 184-chunk fixture: recall is indistinguishable
+across corners (17–18/20 everywhere); the corpus is too small to
+differentiate params. Expect the sweep's output to become load-bearing
+at corpus scales above ~100k nodes — see the
+[`IndexBuildParams` Javadoc](../vector-store-core/src/main/java/io/github/zznate/vectorstore/core/catalog/model/IndexBuildParams.java)
+TODO note.
 
 ## Observability
 

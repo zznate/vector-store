@@ -25,6 +25,17 @@ import java.util.Map;
  * All parameters trade recall against build cost and/or memory. Start with
  * defaults and adjust only if a measurement warrants it.
  *
+ * <p>Canonical place to evaluate a new corner of the parameter space:
+ * {@code IndexBuildParamSweepTest} in {@code vector-store-engine}'s test
+ * sources. It builds one segment per {@link IndexBuildParams} variant from
+ * the Wikipedia + MiniLM-L6-v2 recall fixture and prints recall, build wall
+ * time, and on-disk size to stdout — adding a corner is a one-line change.
+ *
+ * <p>TODO: revisit defaults once a 10k+-vector fixture exists. The current
+ * 184-chunk fixture is too small to differentiate corners meaningfully on
+ * recall; build-time and graph-size differences only become load-bearing at
+ * corpus scales above ~100k nodes.
+ *
  * <ul>
  *   <li><b>{@code m}</b> — graph degree (connections per node). Higher →
  *       better recall at query time, more memory per node, slightly slower
