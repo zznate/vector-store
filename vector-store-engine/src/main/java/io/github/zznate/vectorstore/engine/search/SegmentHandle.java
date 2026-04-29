@@ -7,25 +7,33 @@ import org.slf4j.LoggerFactory;
 
 /**
  * Long-lived per-segment query state. Bundles the loaded JVector graph
- * index and the parsed ordinal-to-user-id map so a cached handle can
- * serve every query against that segment without re-opening the graph
- * file or re-parsing {@code ordinals.jsonl}. The underlying
- * {@link OnDiskGraphIndex} is thread-safe for concurrent
- * {@code getView()} calls; views themselves are short-lived per-query
- * state and remain the caller's responsibility to close.
+ * index, the parsed ordinal-to-user-id map, and a pool of reusable
+ * {@link io.github.jbellis.jvector.graph.GraphSearcher} instances so a
+ * cached handle can serve every query against that segment without
+ * re-opening the graph file, re-parsing {@code ordinals.jsonl}, or
+ * reallocating the searcher's scratch heaps.
+ *
+ * <p>The underlying {@link OnDiskGraphIndex} is thread-safe for
+ * concurrent {@code getView()} calls; the {@link GraphSearcherPool}
+ * coordinates per-thread checkout of searchers (each searcher owns one
+ * View, so the pool also caps the number of open per-segment readers).
  */
-public record SegmentHandle(Segment segment, OnDiskGraphIndex graph, String[] ordinalMap)
+public record SegmentHandle(
+    Segment segment, OnDiskGraphIndex graph, String[] ordinalMap, GraphSearcherPool searcherPool)
     implements AutoCloseable {
 
   private static final Logger LOG = LoggerFactory.getLogger(SegmentHandle.class);
 
   /**
-   * Release the underlying graph resources. Called by the cache when the
+   * Release every per-segment resource. Called by the cache when the
    * handle is evicted; callers must not invoke directly on a cached
    * handle — that races any in-flight query against this segment.
+   * Closes the searcher pool first (closing each pooled searcher's
+   * View and underlying reader), then the graph itself.
    */
   @Override
   public void close() {
+    searcherPool.close();
     try {
       graph.close();
     } catch (Exception e) {

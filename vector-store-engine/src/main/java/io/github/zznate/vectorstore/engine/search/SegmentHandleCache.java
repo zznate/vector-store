@@ -213,7 +213,7 @@ public class SegmentHandleCache {
       ReaderSupplier supplier = segmentStore.openGraph(segment);
       OnDiskGraphIndex graph = OnDiskGraphIndex.load(supplier);
       String[] ordinalMap = loadOrdinalMap(segment);
-      return new SegmentHandle(segment, graph, ordinalMap);
+      return new SegmentHandle(segment, graph, ordinalMap, new GraphSearcherPool(graph));
     } finally {
       span.end();
     }
