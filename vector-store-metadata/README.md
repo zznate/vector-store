@@ -28,7 +28,7 @@ Packages under `io.github.zznate.vectorstore.metadata`:
   | `FilterParser` | Translates the wire-level `Map<String, Object>` from `QueryRequest.filter` into a `FilterExpr`. Recognises top-level `$or` (sole key), top-level `$not` (may sit alongside siblings), and `$in` as a leaf operator on a key. Multiple sibling keys imply implicit AND. Rejects non-string values, range operators, and unknown operators. |
   | `UnsupportedFilterOperatorException` | Plain-Java exception carrying the offending key and operator. The API layer wraps it in a `400 unsupported_operator` response. |
   | `AmbiguousFilterException` | Plain-Java exception raised when an operator's precedence is ambiguous given its siblings (today: top-level `$or` mixed with sibling keys). The API layer wraps it in a `400 bad_request` response. |
-  | `FilterCompiler` | `FilterExpr + OrdinalAttributes -> RoaringBitsAdapter`. Brute-force ordinal scan; a posting-list strategy will replace the scan when the per-segment posting-list sidecar is present, without changing the signature. Emits the `vectorstore.filter.compile.duration` histogram (tagged `index_id`, `term_count`, `result_ratio_bucket`) and the `vectorstore.filter.compile` span. |
+  | `FilterCompiler` | `FilterExpr + OrdinalAttributes (+ optional PostingListReader) -> RoaringBitsAdapter`. Rule-based planner picks the posting-list strategy when every leaf key is indexed and falls back to a brute-force ordinal scan otherwise. Emits the `vectorstore.filter.compile.duration` histogram (tagged `index_id`, `term_count`, `result_ratio_bucket`, `strategy`), the `vectorstore.filter.compile` span, and the `vectorstore.filter.strategy` counter. |
   | `RoaringBitsAdapter` | Adapts a `RoaringBitmap` to JVector's `Bits` interface so the compiled mask feeds `GraphSearcher.search` directly. |
 
 - [`sidecar/`](src/main/java/io/github/zznate/vectorstore/metadata/sidecar) —
@@ -38,8 +38,16 @@ Packages under `io.github.zznate.vectorstore.metadata`:
   | `AttributeSidecar` | Parsed `attributes.jsonl` — a dense `List<Map<String, String>>` indexed by ordinal. Provides `parse(InputStream)` for the read path and `of(List)` for the write path (so the commit can cache the sidecar it just wrote without re-parsing). |
   | `AttributeSidecarWriter` | Serialises an in-memory ordinal list to the JSONL wire format (`{"ordinal":N,"attributes":{...}}` per line). |
   | `TombstoneSidecar` | `RoaringBitmap` wrapper with portable `read(InputStream)` / `toBytes()` + a pure `mergedWith(RoaringBitmap)` helper the commit path uses to union new ordinals with the existing persisted bitmap. |
-  | `SidecarCache` | Process-wide Caffeine cache of parsed sidecars with byte-weighted eviction across attributes and tombstones (default 128 MiB total). |
-  | `SidecarLoader` | Facade that returns parsed sidecars, loading from `SegmentStore.openSidecar` on miss and caching the result. Used by both `QueryCoordinator` (query path) and `CommitCoordinator` (which also calls `invalidate(segment)` after re-uploading tombstones so queries see the fresh bytes). |
+  | `SidecarCache` | Process-wide Caffeine cache of parsed sidecars with byte-weighted eviction across attributes, tombstones, and posting lists (default 128 MiB total). |
+  | `SidecarLoader` | Facade that returns parsed sidecars (`attributes`, `tombstones`, `postings`), loading from `SegmentStore.openSidecar` on miss and caching the result. Used by both `QueryCoordinator` (query path) and `CommitCoordinator` (which calls `invalidate(segment)` after re-uploading sidecars so queries see the fresh bytes). |
+
+- [`posting/`](src/main/java/io/github/zznate/vectorstore/metadata/posting) —
+  | Type | Role |
+  |---|---|
+  | `PostingListConfig` | `@ConfigMapping` over `vectorstore.metadata.posting-list.*`. Today carries one knob: `max-cardinality` (default 10000). |
+  | `PostingListFormat` | On-disk format constants for `postings.bin`: `PLST` magic, version, header layout, varint codec, FNV-1a 64-bit hash. |
+  | `PostingListWriter` | Builds per-`(key, value)` `RoaringBitmap`s from the segment's attribute view, sorts by `(key_hash, value_hash)`, writes the header + index + string-pool + data layout. Returns `WriteResult(bytesWritten, skippedKeys)`; keys with more distinct values than the configured cap are skipped. |
+  | `PostingListReader` | Loads `postings.bin` into memory, parses header + index eagerly, lazily deserialises bitmaps on `lookup(key, value)`. Implements `CachedSidecar` so the cache budget is shared. |
 
 Cache budget is read from
 [`CacheConfig.sidecar()`](../vector-store-core/src/main/java/io/github/zznate/vectorstore/core/cache/CacheConfig.java)
@@ -69,6 +77,69 @@ section below for the property keys.
 
 - Missing attributes never match `Equals` or `In` (there is no `IS NULL` operator). `Not(Equals(k, v))` therefore accepts ordinals that do not carry the key.
 - A `null` / empty filter returns `null` from the parser and the compiler short-circuits to an "accept every ordinal" bitmap; with no tombstones the query coordinator further short-circuits to `Bits.ALL` so the common case allocates nothing.
+
+## Posting-list sidecar
+
+Each segment carries a `postings.bin` written at commit time alongside
+the attribute and tombstone sidecars. It maps every indexed
+`(key, value)` pair to a `RoaringBitmap` of accepting ordinals, so a
+typical filter compile becomes a sequence of bitmap unions and
+intersections instead of a per-ordinal attribute scan.
+
+```
+header (32 bytes)
+  magic       4   "PLST"
+  version     4
+  term_count  4
+  index_off   8
+  data_off    8
+  reserved    4
+
+index block (term_count * 40 bytes, sorted by (key_hash, value_hash))
+  key_hash    8       (FNV-1a 64-bit of the key string)
+  value_hash  8       (FNV-1a 64-bit of the value string)
+  key_off     4       (offset into the string pool)
+  value_off   4
+  data_off    8       (offset within the data block)
+  data_len    8       (serialised RoaringBitmap byte length)
+
+string-pool block      (varint-length-prefixed UTF-8)
+data block             (concatenated portable RoaringBitmap bytes)
+```
+
+All multi-byte integers are big-endian, matching JVector's wire
+convention. The string pool resolves any hash collisions on lookup.
+
+### Strategy selection
+
+`FilterCompiler` is a small rule-based planner:
+
+| Filter shape | Strategy |
+|---|---|
+| Every leaf predicate (`Equals`, `In`) names a key in `PostingListReader.indexedKeys()` | **posting-list** — recursive bitmap `AND` / `OR` / `andNot` over the per-`(key, value)` lists; `Not(t)` is computed against the full `[0, vector_count)` ordinal range |
+| Any leaf names a key with no posting list (or no posting-list sidecar is loaded) | **scan** — brute-force ordinal evaluation against the attribute view |
+| `null` filter | accept-all short-circuit; no strategy chosen |
+
+Cost-based selection (using per-key cardinality and selectivity hints)
+is named in [`FUTURE.md`](FUTURE.md).
+
+### High-cardinality fallback
+
+`PostingListWriter` skips any key whose distinct-value count exceeds
+`vectorstore.metadata.posting-list.max-cardinality` (default 10000).
+Skipped keys come back on `WriteResult.skippedKeys()` and are
+DEBUG-logged once per commit. Filters against a skipped key resolve to
+the scan strategy at query time.
+
+### Observability
+
+- `vectorstore.filter.strategy{strategy=posting_list|scan, index_id}` —
+  counter incremented once per compile.
+- `vectorstore.filter.compile.duration{index_id, term_count,
+  result_ratio_bucket, strategy}` — existing histogram, now broken
+  down by strategy so the two paths' latency is comparable.
+- `vectorstore.posting_list.size{index_id}` — distribution summary of
+  per-segment `postings.bin` byte size, recorded once per commit.
 
 ## Sidecar cache behaviour
 
@@ -105,20 +176,10 @@ notes live here:
 
 ## Future work
 
-- **Per-attribute posting lists** generated at segment build time. The
-  `FilterCompiler` signature stays put; the implementation switches from
-  ordinal scan to recursive bitmap operations over pre-built posting
-  lists, narrowing candidates before graph search rather than filtering
-  the search output. Closes the recall gap on restrictive filters
-  documented in the engine module's filtered-recall integration test.
-- **Range operators on numeric attributes** (`$gt`, `$lt`, `$gte`,
-  `$lte`, `$between`). Requires the attribute type system below; new
-  `FilterExpr.Range` sealed variant; rejected by the parser today.
-- **Attribute type system** beyond strings. Requires a schema carried on
-  the index or negotiated at write time.
-- **Multi-tier sidecar cache**: an `L2Provider` behind the heap tier
-  (the same shape the block cache already uses) when sidecar working
-  sets routinely exceed the heap budget.
+See [`FUTURE.md`](FUTURE.md) for the deferred backlog: FST-based
+posting-list index, per-key cardinality hint in the header, block-level
+compression, range operators + typed attributes, cost-based strategy
+selection, and the multi-tier sidecar cache.
 
 ## Local development
 

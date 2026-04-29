@@ -247,6 +247,175 @@ class FilterAndTombstoneIT extends AbstractResourceTest {
         .body("message", org.hamcrest.Matchers.containsString("$gt"));
   }
 
+  @Test
+  void ambiguousTopLevelOrReturns400BadRequest() {
+    String indexName = "reject-ambiguous";
+    createIndex(indexName);
+
+    String body =
+        "{\"vector\":["
+            + zeros(DIM)
+            + "],\"topK\":5,\"filter\":{\"$or\":[{\"category\":\"A\"}],\"region\":\"us\"}}";
+    given()
+        .header(ApiKeyAuthenticationFilter.HEADER, ADMIN_TOKEN)
+        .contentType(ContentType.JSON)
+        .body(body)
+        .when()
+        .post("/v1/indexes/" + BUCKET + "/" + indexName + "/vectors:query")
+        .then()
+        .statusCode(400)
+        .body("error", org.hamcrest.Matchers.is("bad_request"))
+        .body("message", org.hamcrest.Matchers.containsString("$or"))
+        .body("message", org.hamcrest.Matchers.containsString("region"));
+  }
+
+  @Test
+  void extendedGrammarReturnsCorrectFilteredHits() {
+    String indexName = "filter-grammar";
+    createIndex(
+        indexName, "{\"m\":64,\"beamWidth\":400,\"neighborOverflow\":1.5,\"addHierarchy\":true}");
+
+    int total = 1_500;
+    String[] categories = {"A", "B", "C"};
+    String[] regions = {"us", "eu"};
+    Random rng = new Random(2026_04_30L);
+    StringBuilder body = new StringBuilder("{\"vectors\":[");
+    for (int i = 0; i < total; i++) {
+      float[] v = randomUnit(rng, DIM);
+      String cat = categories[i % categories.length];
+      String region = regions[i % regions.length];
+      if (i > 0) {
+        body.append(",");
+      }
+      body.append("{\"id\":\"v-").append(i).append("\",\"vector\":[");
+      for (int j = 0; j < DIM; j++) {
+        if (j > 0) {
+          body.append(",");
+        }
+        body.append(v[j]);
+      }
+      body.append(
+              "],\"attributes\":{\"category\":\"")
+          .append(cat)
+          .append("\",\"region\":\"")
+          .append(region)
+          .append("\"}}");
+    }
+    body.append("]}");
+
+    putVectors(indexName, body.toString());
+    commit(indexName).then().statusCode(200);
+
+    float[] q = randomUnit(rng, DIM);
+    int topK = 10;
+
+    // $or — every hit must satisfy category in {A, B}
+    Response orResp =
+        query(
+            indexName,
+            q,
+            topK,
+            "{\"$or\":[{\"category\":\"A\"},{\"category\":\"B\"}]}");
+    orResp.then().statusCode(200);
+    List<String> orCategories = orResp.jsonPath().getList("hits.attributes.category");
+    assertThat(orCategories).isNotEmpty();
+    assertThat(orCategories).allMatch(c -> "A".equals(c) || "B".equals(c));
+
+    // $not — every hit must satisfy NOT category=A
+    Response notResp =
+        query(indexName, q, topK, "{\"$not\":{\"category\":\"A\"}}");
+    notResp.then().statusCode(200);
+    List<String> notCategories = notResp.jsonPath().getList("hits.attributes.category");
+    assertThat(notCategories).isNotEmpty();
+    assertThat(notCategories).allMatch(c -> !"A".equals(c));
+
+    // $in — every hit must satisfy category in {A, C}
+    Response inResp =
+        query(indexName, q, topK, "{\"category\":{\"$in\":[\"A\",\"C\"]}}");
+    inResp.then().statusCode(200);
+    List<String> inCategories = inResp.jsonPath().getList("hits.attributes.category");
+    assertThat(inCategories).isNotEmpty();
+    assertThat(inCategories).allMatch(c -> "A".equals(c) || "C".equals(c));
+
+    // Mixed: category in {A,B} AND NOT region=eu
+    Response mixedResp =
+        query(
+            indexName,
+            q,
+            topK,
+            "{\"category\":{\"$in\":[\"A\",\"B\"]},\"$not\":{\"region\":\"eu\"}}");
+    mixedResp.then().statusCode(200);
+    List<String> mixedCategories = mixedResp.jsonPath().getList("hits.attributes.category");
+    List<String> mixedRegions = mixedResp.jsonPath().getList("hits.attributes.region");
+    assertThat(mixedCategories).isNotEmpty();
+    for (int i = 0; i < mixedCategories.size(); i++) {
+      String c = mixedCategories.get(i);
+      String r = mixedRegions.get(i);
+      assertThat("A".equals(c) || "B".equals(c)).as("category %s in {A,B}", c).isTrue();
+      assertThat(r).as("region must not be eu").isNotEqualTo("eu");
+    }
+
+  }
+
+  @Test
+  void highCardinalityKeyFallsBackToScanAndQuerySucceeds() {
+    String indexName = "filter-high-card";
+    createIndex(indexName);
+
+    // Two batches push the per-vector uniq attribute past the default
+    // max-cardinality of 10_000 so the writer skips its posting list; the
+    // planner must then fall back to scan for filters on uniq. Each batch
+    // is capped at 6_000 to fit under PutVectorsRequest's 10_000-per-call
+    // limit.
+    int batchSize = 6_000;
+    Random rng = new Random(99L);
+    putBatch(indexName, rng, 0, batchSize);
+    putBatch(indexName, rng, batchSize, batchSize);
+    commit(indexName).then().statusCode(200);
+
+    float[] q = randomUnit(rng, DIM);
+
+    // Filtering on the high-cardinality key must not crash the planner —
+    // uniq has no posting list so the compiler falls back to scan and
+    // produces a valid (possibly tiny) accept mask. We don't assert on
+    // hits returned: a 1-in-12_000 selectivity on Gaussian random vectors
+    // is below JVector's recall floor under a pop-time accept-mask.
+    query(indexName, q, 1, "{\"uniq\":\"u-1234\"}").then().statusCode(200);
+
+    // The indexed key continues to serve the posting-list path on the
+    // same segment.
+    Response indexedResp = query(indexName, q, 5, "{\"category\":\"A\"}");
+    indexedResp.then().statusCode(200);
+    List<String> cats = indexedResp.jsonPath().getList("hits.attributes.category");
+    assertThat(cats).isNotEmpty().allMatch("A"::equals);
+  }
+
+  private void putBatch(String indexName, Random rng, int idOffset, int count) {
+    StringBuilder body = new StringBuilder("{\"vectors\":[");
+    for (int i = 0; i < count; i++) {
+      int id = idOffset + i;
+      float[] v = randomUnit(rng, DIM);
+      if (i > 0) {
+        body.append(",");
+      }
+      body.append("{\"id\":\"u-").append(id).append("\",\"vector\":[");
+      for (int j = 0; j < DIM; j++) {
+        if (j > 0) {
+          body.append(",");
+        }
+        body.append(v[j]);
+      }
+      String cat = id % 3 == 0 ? "A" : id % 3 == 1 ? "B" : "C";
+      body.append("],\"attributes\":{\"category\":\"")
+          .append(cat)
+          .append("\",\"uniq\":\"u-")
+          .append(id)
+          .append("\"}}");
+    }
+    body.append("]}");
+    putVectors(indexName, body.toString());
+  }
+
   // ------------------------------------------------------------------
 
   private void createIndex(String indexName) {

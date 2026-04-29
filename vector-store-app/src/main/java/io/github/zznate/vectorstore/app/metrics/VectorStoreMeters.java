@@ -77,5 +77,14 @@ public class VectorStoreMeters {
     Timer.builder(MetricNames.FILTER_COMPILE_DURATION)
         .description("Cost of compiling a filter predicate into a Bits mask")
         .register(registry);
+
+    Counter.builder(MetricNames.FILTER_STRATEGY)
+        .description("Filter compile strategy chosen by the planner, per segment")
+        .register(registry);
+
+    DistributionSummary.builder(MetricNames.POSTING_LIST_SIZE)
+        .description("Bytes of postings.bin produced per segment")
+        .baseUnit("bytes")
+        .register(registry);
   }
 }

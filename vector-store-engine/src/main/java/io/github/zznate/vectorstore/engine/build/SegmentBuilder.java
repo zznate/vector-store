@@ -147,6 +147,7 @@ public class SegmentBuilder {
     RandomAccessVectorValues ravv = new ListRandomAccessVectorValues(jvectorValues, dimension);
 
     buildAndWrite(snapshot, segmentId, tempDir, ravv, metric, params);
+    recordPostingsSize(snapshot.indexId(), tempDir.resolve("postings.bin"));
 
     Instant finishedAt = clock.instant();
     long bytes = sizeOf(tempDir);
@@ -238,6 +239,17 @@ public class SegmentBuilder {
           segmentId,
           result.skippedKeys().size(),
           result.skippedKeys());
+    }
+  }
+
+  private void recordPostingsSize(String indexId, Path postingsPath) throws IOException {
+    if (Files.exists(postingsPath)) {
+      DistributionSummary.builder("vectorstore.posting_list.size")
+          .description("Bytes of postings.bin produced per segment")
+          .baseUnit("bytes")
+          .tag("index_id", indexId)
+          .register(meterRegistry)
+          .record(Files.size(postingsPath));
     }
   }
 

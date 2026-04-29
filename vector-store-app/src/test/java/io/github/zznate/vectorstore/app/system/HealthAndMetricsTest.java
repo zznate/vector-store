@@ -47,6 +47,7 @@ class HealthAndMetricsTest {
                 containsString("vectorstore_cache_hit"),
                 containsString("vectorstore_cache_miss"),
                 containsString("vectorstore_cache_eviction"),
-                containsString("vectorstore_filter_compile_duration")));
+                containsString("vectorstore_filter_compile_duration"),
+                containsString("vectorstore_filter_strategy")));
   }
 }

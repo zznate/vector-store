@@ -66,6 +66,12 @@ public final class MetricNames {
   /** Timer: cost to compile a filter predicate into a Bits mask. */
   public static final String FILTER_COMPILE_DURATION = "vectorstore.filter.compile.duration";
 
+  /** Counter: filter compile strategy chosen by the planner (posting_list | scan). */
+  public static final String FILTER_STRATEGY = "vectorstore.filter.strategy";
+
+  /** DistributionSummary: bytes of postings.bin produced per segment, tagged by index_id. */
+  public static final String POSTING_LIST_SIZE = "vectorstore.posting_list.size";
+
   // --- Common tag keys ----------------------------------------------------
 
   public static final String TAG_INDEX_ID = "index_id";
