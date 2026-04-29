@@ -1,4 +1,4 @@
-package io.github.zznate.vectorstore.engine.testsupport;
+package io.github.zznate.vectorstore.testsupport.fixtures;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.BufferedReader;
@@ -10,10 +10,15 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Loads the recall fixture from the engine module's test resources. The
- * fixture itself is generated offline by {@code vector-store-datagen}
- * (never by CI) and committed under
- * {@code src/test/resources/recall/}.
+ * Loads the Wikipedia + MiniLM-L6-v2 recall fixture from this module's
+ * resources. The fixture is generated offline by
+ * {@code vector-store-datagen} and committed under
+ * {@code src/main/resources/recall/}; CI never regenerates it.
+ *
+ * <p>Designed for use as a {@code <scope>test</scope>} dependency: any
+ * sibling module's test code can call {@link #loadCorpus()} /
+ * {@link #loadQueries()} without taking a runtime dependency on the
+ * fixture.
  */
 public final class RecallFixture {
 
@@ -36,9 +41,11 @@ public final class RecallFixture {
         throw new IOException(
             "recall fixture not found on classpath at "
                 + classpathResource
-                + ". Run `./mvnw -pl vector-store-datagen exec:java@generate-recall-fixture` to produce it.");
+                + ". Run `./mvnw -pl vector-store-datagen exec:java@generate-recall-fixture` "
+                + "and copy the output into vector-store-test-support/src/main/resources/recall/.");
       }
-      try (BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
+      try (BufferedReader reader =
+          new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
         List<T> out = new ArrayList<>();
         String line;
         while ((line = reader.readLine()) != null) {

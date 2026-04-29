@@ -39,7 +39,22 @@ embedder input size; actual WordPiece counts are ~1.3× word counts.
 ```
 ./mvnw -pl vector-store-datagen exec:java@generate-recall-fixture
 ./mvnw -pl vector-store-datagen exec:java@validate-fixture
+cp vector-store-datagen/target/recall/{corpus,queries}.jsonl \
+   vector-store-test-support/src/main/resources/recall/
 ```
 
 The first run downloads ~400 MB of PyTorch native libraries + the model
-weights into `~/.djl.ai/`. Subsequent runs are fast.
+weights into `~/.djl.ai/`. Subsequent runs are fast. After regeneration,
+the JSONL files must be copied into this module — datagen writes to its
+own `target/`.
+
+## Consumers
+
+- `vector-store-engine` — `SegmentBuilderRecallTest` (default-params
+  recall regression gate) and `IndexBuildParamSweepTest` (parameter
+  sweep harness).
+- `vector-store-app` — `WikipediaFilteredRecallIT` (real-embedding
+  filtered-recall over the full HTTP path).
+
+Loaded via
+[`RecallFixture`](../../java/io/github/zznate/vectorstore/testsupport/fixtures/RecallFixture.java).

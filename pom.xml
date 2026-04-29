@@ -38,6 +38,7 @@
     <module>vector-store-metadata</module>
     <module>vector-store-app</module>
     <module>vector-store-datagen</module>
+    <module>vector-store-test-support</module>
   </modules>
 
   <properties>
@@ -229,6 +230,11 @@
       <dependency>
         <groupId>io.github.zznate</groupId>
         <artifactId>vector-store-metadata</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.github.zznate</groupId>
+        <artifactId>vector-store-test-support</artifactId>
         <version>${project.version}</version>
       </dependency>
     </dependencies>

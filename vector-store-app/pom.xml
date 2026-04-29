@@ -136,6 +136,12 @@
       <artifactId>junit-jupiter</artifactId>
       <scope>test</scope>
     </dependency>
+    <!-- Shared fixtures: Wikipedia + MiniLM-L6-v2 recall corpus. -->
+    <dependency>
+      <groupId>io.github.zznate</groupId>
+      <artifactId>vector-store-test-support</artifactId>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <build>

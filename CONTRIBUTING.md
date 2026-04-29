@@ -9,13 +9,19 @@ project follows, and where to look for context on a given subsystem.
 Run these from the repo root before opening a PR:
 
 ```
-./mvnw verify             # full unit + integration tests across the reactor
-./mvnw pmd:check          # complexity + correctness gate
-./mvnw checkstyle:check   # lexical / style gate
+./mvnw install -DskipTests   # install all module artifacts to ~/.m2/
+./mvnw verify                # full unit + integration tests across the reactor
+./mvnw pmd:check             # complexity + correctness gate
+./mvnw checkstyle:check      # lexical / style gate
 ```
 
-All three must pass. CI does not run PMD or Checkstyle today (they are
+All four must pass. CI does not run PMD or Checkstyle today (they are
 manual gates), so a green local run is the contract.
+
+The leading `install` step is only load-bearing the first time after a
+new module is added (or a fresh checkout) — `pmd:check` resolves
+inter-module dependencies through the local Maven repo and fails if a
+sibling artifact has not been installed there yet.
 
 | Gate | What it covers | Where the rules live |
 |---|---|---|

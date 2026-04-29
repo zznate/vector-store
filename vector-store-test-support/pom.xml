@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>io.github.zznate</groupId>
+    <artifactId>vector-store-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>vector-store-test-support</artifactId>
+  <name>vector-store-test-support</name>
+  <description>
+    Shared test fixtures and loaders used by sibling modules' test code.
+    Packaged as a regular jar (rather than a maven-jar-plugin test-jar) so
+    the dependency graph stays explicit: consumers declare a normal
+    dependency under the `test` scope. Today carries the Wikipedia +
+    MiniLM-L6-v2 recall fixture (corpus.jsonl + queries.jsonl) and its
+    record types; future fixtures live alongside.
+  </description>
+
+  <dependencies>
+    <!--
+      Jackson for JSONL fixture parsing. Provided so consumers (which
+      already have it on their test classpath via Quarkus or otherwise)
+      pick up their own version; no version pinning here.
+    -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <scope>provided</scope>
+    </dependency>
+  </dependencies>
+</project>
