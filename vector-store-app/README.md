@@ -34,6 +34,13 @@ Nothing outside the module consumes its classes. What lives here:
 - [`metrics/VectorStoreMeters`](src/main/java/io/github/zznate/vectorstore/app/metrics/VectorStoreMeters.java) —
   eagerly registers each of those meters at startup so `/q/metrics` is
   stable from boot.
+- [`retention/RetentionSweepProducer`](src/main/java/io/github/zznate/vectorstore/app/retention/RetentionSweepProducer.java) —
+  builds the [`RetentionSweep`](../vector-store-core/src/main/java/io/github/zznate/vectorstore/core/retention/RetentionSweep.java)
+  bean by wiring core repositories + the configured `SegmentStore`.
+- [`retention/RetentionSweepScheduler`](src/main/java/io/github/zznate/vectorstore/app/retention/RetentionSweepScheduler.java) —
+  Quarkus `@Scheduled` binding that fires every
+  `vectorstore.retention.interval` and short-circuits when
+  `vectorstore.retention.enabled=false`. See [Retention sweep](#retention-sweep).
 
 `quarkus.index-dependency` entries in `application.properties` tell the
 Quarkus build-time indexer to scan `vector-store-core` and `vector-store-api`
@@ -70,6 +77,10 @@ properties.
 | `VECTORSTORE_AUTH_ARGON2_ITERATIONS` | `vectorstore.auth.argon2.iterations` | `3` |
 | `VECTORSTORE_AUTH_ARGON2_MEMORY_KIB` | `vectorstore.auth.argon2.memory-kib` | `65536` |
 | `VECTORSTORE_AUTH_ARGON2_PARALLELISM` | `vectorstore.auth.argon2.parallelism` | `1` |
+| `VECTORSTORE_RETENTION_ENABLED` | `vectorstore.retention.enabled` | `false` |
+| `VECTORSTORE_RETENTION_INTERVAL` | `vectorstore.retention.interval` | `PT15M` |
+| `VECTORSTORE_RETENTION_INDEX_WINDOW` | `vectorstore.retention.index.window` | `P7D` |
+| `VECTORSTORE_RETENTION_BUCKET_WINDOW` | `vectorstore.retention.bucket.window` | `P7D` |
 
 ### Profiles
 
@@ -130,6 +141,32 @@ If you want to inspect without deleting, `sqlite3 ./vector-store.db
 "SELECT key_id, bucket_id, created_at FROM api_key;"` shows the full
 set — the stored `secret_hash` is Argon2id, so nothing sensitive leaks
 from that query.
+
+### Retention sweep
+
+Soft-deleted bucket / index rows survive a configurable retention window
+before the in-process sweep hard-deletes them and cascades object-store
+cleanup. Disabled by default (`VECTORSTORE_RETENTION_ENABLED=false`) so
+fresh deployments never silently drop data — operators must opt in
+explicitly.
+
+| Key | Default | Notes |
+|---|---|---|
+| `vectorstore.retention.enabled` | `false` | Master switch. When `false`, the `@Scheduled` binding fires but `RetentionSweepScheduler.tick()` returns immediately. |
+| `vectorstore.retention.interval` | `PT15M` | ISO-8601 `Duration`. How often the sweep wakes. Cron syntax is also accepted by the underlying Quarkus extension if needed. |
+| `vectorstore.retention.index.window` | `P7D` | Soft-deleted index rows older than this become eligible for hard-delete. |
+| `vectorstore.retention.bucket.window` | `P7D` | Soft-deleted bucket rows older than this *and* with no remaining child indexes (any state) become eligible for hard-delete. Effective bucket lifetime is therefore at least `max(bucket.window, index.window)`. |
+
+The defaults are encoded twice — `@WithDefault` annotations on
+[`RetentionConfig`](../vector-store-core/src/main/java/io/github/zznate/vectorstore/core/retention/RetentionConfig.java)
+(the SmallRye fallback) and explicit lines in `application.properties`
+(operator-readable documentation). Keep both in sync when tuning. See
+[`vector-store-api/README.md`](../vector-store-api/README.md#lifecycle-and-soft-delete)
+for the REST contract changes that pair with this config.
+
+The sweep itself does not check `enabled` — that is the scheduler's
+job. Tests inject `RetentionSweep` directly and call `runOnce()` so
+they exercise the cascade without depending on the scheduler timer.
 
 ## Local development
 

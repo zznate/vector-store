@@ -189,6 +189,7 @@ reference):
 | `VECTORSTORE_STORAGE_SECRET_KEY` | S3 secret key | `minioadmin` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP collector endpoint | `http://localhost:4317` |
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | OTLP protocol | `grpc` |
+| `VECTORSTORE_RETENTION_ENABLED` | Master switch for the retention sweep that hard-deletes soft-deleted bucket / index rows after the configured window. Disabled by default — operators must opt in. | `false` |
 
 ## License
 

@@ -28,6 +28,10 @@ Every caller outside this module consumes one of:
   `BucketRepository`, `VectorIndexRepository`, `SegmentRepository`,
   `ManifestVersionRepository`, `ApiKeyRepository`,
   `StagedTombstoneRepository`.
+- Soft-delete + retention orchestration in [`retention`](src/main/java/io/github/zznate/vectorstore/core/retention):
+  `RetentionConfig` (`@ConfigMapping`) and `RetentionSweep` (pure-Java
+  cascade — no Quarkus dependency). The Quarkus `@Scheduled` binding
+  lives in [`vector-store-app`](../vector-store-app/README.md#retention-sweep).
 - Cache abstractions in [`cache`](src/main/java/io/github/zznate/vectorstore/core/cache):
   - `CacheTier<K, V>` / `HeapCacheTier` — Caffeine-backed L1, byte- or
     count-weighted, emits the standard
@@ -200,6 +204,42 @@ Modes:
 Drift is normal once globals move (existing indexes keep their
 persisted params); the INFO log is the operator's paper trail.
 Parse failures usually signal a corrupted catalog row.
+
+## Soft-delete + retention
+
+`Bucket` and `VectorIndex` carry a nullable `deletedAt`. Active reads
+filter `WHERE deleted_at IS NULL` at the DAO layer; `EXPLAIN QUERY
+PLAN` confirms every filtered query uses an index for the primary
+predicate (`bucket_id` / `index_id` PK or the `idx_vector_index_bucket`
+secondary) and treats `deleted_at` as a residual filter. The `list*`
+methods are the only full-table scans, and they are bounded by per-method
+`LIMIT` plus documented caller invariants.
+
+Repository surface beyond CRUD:
+
+| Method | Caller | Notes |
+|---|---|---|
+| `findById` | REST read paths | Hides soft-deleted rows. |
+| `findIncludingDeleted` | re-creation guard, restore, sweep | Returns any row regardless of state. |
+| `softDelete(id, Instant)` | REST `DELETE` | Idempotent: returns `false` if already soft-deleted. |
+| `restore(id)` | restore endpoint (task #13) | Returns `false` if absent or already active. |
+| `hardDelete(id)` | retention sweep | Production REST never calls this. |
+| `listSoftDeletedBefore(Instant)` | retention sweep | Filters by `deleted_at < cutoff`, ordered ASC. |
+| `countAnyByBucket(bucketId)` (VectorIndex only) | retention sweep | Includes soft-deleted rows. Sweep gates bucket hard-delete on this returning 0. |
+
+`VectorIndexRepository.deleteByIndex` and
+`ManifestVersionRepository.deleteByIndex` are sweep-only batch removes
+used during index hard-delete. `StagedTombstoneRepository.clearForIndex`
+is invoked on index soft-delete (REST path) to drop pending tombstones —
+a soft-deleted index must not be reachable through any cached or queued
+state.
+
+### `vectorstore.retention.*` — sweep configuration
+
+Bound by [`RetentionConfig`](src/main/java/io/github/zznate/vectorstore/core/retention/RetentionConfig.java)
+in this module; the scheduler binding + property comments live in
+[`vector-store-app`](../vector-store-app/README.md#retention-sweep).
+Disabled by default. See that page for the full table.
 
 ## Dependencies
 
