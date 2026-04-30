@@ -21,8 +21,8 @@ class IndexesResourceTest extends AbstractResourceTest {
 
   @BeforeEach
   void seedBuckets() {
-    buckets.create(new Bucket(DEMO_BUCKET, "Demo", clock.instant()));
-    buckets.create(new Bucket(OTHER_BUCKET, "Other", clock.instant()));
+    buckets.create(Bucket.active(DEMO_BUCKET, "Demo", clock.instant()));
+    buckets.create(Bucket.active(OTHER_BUCKET, "Other", clock.instant()));
   }
 
   @Test

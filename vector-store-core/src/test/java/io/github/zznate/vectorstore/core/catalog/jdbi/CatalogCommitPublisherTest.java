@@ -44,8 +44,9 @@ class CatalogCommitPublisherTest {
     publisher = new CatalogCommitPublisher(fixture.jdbi());
 
     Instant t = Instant.now().truncatedTo(ChronoUnit.MILLIS);
-    buckets.create(new Bucket("demo", "Demo", t));
-    indexes.create(new VectorIndex(INDEX_ID, "demo", "Products", 4, DistanceMetric.COSINE, "{}", t));
+    buckets.create(Bucket.active("demo", "Demo", t));
+    indexes.create(
+        VectorIndex.active(INDEX_ID, "demo", "Products", 4, DistanceMetric.COSINE, "{}", t));
   }
 
   @AfterEach

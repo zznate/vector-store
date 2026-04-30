@@ -25,7 +25,7 @@ class VectorIndexRepositoryJdbiTest {
     fixture = new CatalogTestFixture();
     buckets = new BucketRepositoryJdbi(fixture.jdbi());
     indexes = new VectorIndexRepositoryJdbi(fixture.jdbi());
-    buckets.create(new Bucket("demo", "Demo", Instant.now().truncatedTo(ChronoUnit.MILLIS)));
+    buckets.create(Bucket.active("demo", "Demo", Instant.now().truncatedTo(ChronoUnit.MILLIS)));
   }
 
   @AfterEach
@@ -36,7 +36,7 @@ class VectorIndexRepositoryJdbiTest {
   @Test
   void createThenFindByIdReturnsSameRecordWithEnumAndJsonPreserved() {
     VectorIndex index =
-        new VectorIndex(
+        VectorIndex.active(
             "demo/products",
             "demo",
             "Products",
@@ -52,14 +52,15 @@ class VectorIndexRepositoryJdbiTest {
 
   @Test
   void listByBucketReturnsOnlyThatBucketsIndexes() {
-    buckets.create(new Bucket("other", "Other", Instant.now().truncatedTo(ChronoUnit.MILLIS)));
+    buckets.create(Bucket.active("other", "Other", Instant.now().truncatedTo(ChronoUnit.MILLIS)));
     Instant t = Instant.parse("2026-04-01T00:00:00Z");
     indexes.create(
-        new VectorIndex("demo/a", "demo", "A", 4, DistanceMetric.COSINE, "{}", t));
+        VectorIndex.active("demo/a", "demo", "A", 4, DistanceMetric.COSINE, "{}", t));
     indexes.create(
-        new VectorIndex("demo/b", "demo", "B", 4, DistanceMetric.COSINE, "{}", t.plusSeconds(1)));
+        VectorIndex.active(
+            "demo/b", "demo", "B", 4, DistanceMetric.COSINE, "{}", t.plusSeconds(1)));
     indexes.create(
-        new VectorIndex("other/c", "other", "C", 4, DistanceMetric.EUCLIDEAN, "{}", t));
+        VectorIndex.active("other/c", "other", "C", 4, DistanceMetric.EUCLIDEAN, "{}", t));
 
     assertThat(indexes.listByBucket("demo"))
         .extracting(VectorIndex::indexId)
@@ -68,14 +69,16 @@ class VectorIndexRepositoryJdbiTest {
 
   @Test
   void listAllReturnsEveryIndexAcrossBucketsOrderedByCreatedAt() {
-    buckets.create(new Bucket("other", "Other", Instant.now().truncatedTo(ChronoUnit.MILLIS)));
+    buckets.create(Bucket.active("other", "Other", Instant.now().truncatedTo(ChronoUnit.MILLIS)));
     Instant t = Instant.parse("2026-04-01T00:00:00Z");
     indexes.create(
-        new VectorIndex("demo/a", "demo", "A", 4, DistanceMetric.COSINE, "{}", t));
+        VectorIndex.active("demo/a", "demo", "A", 4, DistanceMetric.COSINE, "{}", t));
     indexes.create(
-        new VectorIndex("other/c", "other", "C", 4, DistanceMetric.EUCLIDEAN, "{}", t.plusSeconds(1)));
+        VectorIndex.active(
+            "other/c", "other", "C", 4, DistanceMetric.EUCLIDEAN, "{}", t.plusSeconds(1)));
     indexes.create(
-        new VectorIndex("demo/b", "demo", "B", 4, DistanceMetric.COSINE, "{}", t.plusSeconds(2)));
+        VectorIndex.active(
+            "demo/b", "demo", "B", 4, DistanceMetric.COSINE, "{}", t.plusSeconds(2)));
 
     assertThat(indexes.listAll())
         .extracting(VectorIndex::indexId)
@@ -83,9 +86,9 @@ class VectorIndexRepositoryJdbiTest {
   }
 
   @Test
-  void deleteRemovesTheIndex() {
+  void hardDeleteRemovesTheIndex() {
     indexes.create(
-        new VectorIndex(
+        VectorIndex.active(
             "demo/x",
             "demo",
             "X",
@@ -94,8 +97,89 @@ class VectorIndexRepositoryJdbiTest {
             "{}",
             Instant.now().truncatedTo(ChronoUnit.MILLIS)));
 
-    indexes.delete("demo/x");
+    indexes.hardDelete("demo/x");
 
     assertThat(indexes.findById("demo/x")).isEmpty();
+    assertThat(indexes.findIncludingDeleted("demo/x")).isEmpty();
+  }
+
+  @Test
+  void softDeleteHidesFromActiveReadsButFindIncludingDeletedReturnsRow() {
+    Instant created = Instant.parse("2026-04-01T00:00:00Z");
+    indexes.create(
+        VectorIndex.active("demo/x", "demo", "X", 4, DistanceMetric.COSINE, "{}", created));
+    Instant at = Instant.parse("2026-04-10T00:00:00Z");
+
+    assertThat(indexes.softDelete("demo/x", at)).isTrue();
+
+    assertThat(indexes.findById("demo/x")).isEmpty();
+    assertThat(indexes.listByBucket("demo")).isEmpty();
+    assertThat(indexes.listAll()).isEmpty();
+    assertThat(indexes.findIncludingDeleted("demo/x"))
+        .hasValueSatisfying(
+            row -> {
+              assertThat(row.deletedAt()).isEqualTo(at);
+              assertThat(row.isDeleted()).isTrue();
+            });
+  }
+
+  @Test
+  void softDeleteIsIdempotentReturnsFalseSecondTime() {
+    Instant created = Instant.parse("2026-04-01T00:00:00Z");
+    indexes.create(
+        VectorIndex.active("demo/x", "demo", "X", 4, DistanceMetric.COSINE, "{}", created));
+    Instant first = Instant.parse("2026-04-10T00:00:00Z");
+    Instant second = Instant.parse("2026-04-11T00:00:00Z");
+
+    assertThat(indexes.softDelete("demo/x", first)).isTrue();
+    assertThat(indexes.softDelete("demo/x", second)).isFalse();
+    assertThat(indexes.findIncludingDeleted("demo/x"))
+        .hasValueSatisfying(row -> assertThat(row.deletedAt()).isEqualTo(first));
+  }
+
+  @Test
+  void restoreClearsDeletedAtAndReturnsRowToActiveReads() {
+    Instant created = Instant.parse("2026-04-01T00:00:00Z");
+    indexes.create(
+        VectorIndex.active("demo/x", "demo", "X", 4, DistanceMetric.COSINE, "{}", created));
+    indexes.softDelete("demo/x", Instant.parse("2026-04-10T00:00:00Z"));
+
+    assertThat(indexes.restore("demo/x")).isTrue();
+    assertThat(indexes.restore("demo/x")).isFalse();
+    assertThat(indexes.findById("demo/x")).isPresent();
+  }
+
+  @Test
+  void listSoftDeletedBeforeReturnsOnlyExpiredRows() {
+    Instant created = Instant.parse("2026-04-01T00:00:00Z");
+    indexes.create(
+        VectorIndex.active("demo/a", "demo", "A", 4, DistanceMetric.COSINE, "{}", created));
+    indexes.create(
+        VectorIndex.active("demo/b", "demo", "B", 4, DistanceMetric.COSINE, "{}", created));
+    indexes.create(
+        VectorIndex.active("demo/c", "demo", "C", 4, DistanceMetric.COSINE, "{}", created));
+
+    indexes.softDelete("demo/a", Instant.parse("2026-04-10T00:00:00Z"));
+    indexes.softDelete("demo/b", Instant.parse("2026-04-15T00:00:00Z"));
+    // demo/c stays active
+
+    Instant cutoff = Instant.parse("2026-04-12T00:00:00Z");
+    assertThat(indexes.listSoftDeletedBefore(cutoff))
+        .extracting(VectorIndex::indexId)
+        .containsExactly("demo/a");
+  }
+
+  @Test
+  void countAnyByBucketIncludesSoftDeletedRows() {
+    Instant created = Instant.parse("2026-04-01T00:00:00Z");
+    indexes.create(
+        VectorIndex.active("demo/a", "demo", "A", 4, DistanceMetric.COSINE, "{}", created));
+    indexes.create(
+        VectorIndex.active("demo/b", "demo", "B", 4, DistanceMetric.COSINE, "{}", created));
+
+    indexes.softDelete("demo/a", Instant.parse("2026-04-10T00:00:00Z"));
+
+    assertThat(indexes.countAnyByBucket("demo")).isEqualTo(2);
+    assertThat(indexes.listByBucket("demo")).extracting(VectorIndex::indexId).containsExactly("demo/b");
   }
 }

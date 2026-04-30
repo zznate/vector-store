@@ -190,7 +190,7 @@ class CachePolicyEnforcerTest {
     String indexId = bucket + "/" + indexName;
     if (harness.indexes.findById(indexId).isEmpty()) {
       harness.indexes.register(
-          new VectorIndex(
+          VectorIndex.active(
               indexId,
               bucket,
               indexName,

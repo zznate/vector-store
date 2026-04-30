@@ -83,7 +83,7 @@ public final class EngineTestHarness implements AutoCloseable {
       throws IOException {
     String indexId = bucket + "/" + indexName;
     indexes.register(
-        new VectorIndex(
+        VectorIndex.active(
             indexId,
             bucket,
             indexName,
@@ -156,21 +156,79 @@ public final class EngineTestHarness implements AutoCloseable {
 
     @Override
     public Optional<VectorIndex> findById(String indexId) {
+      return Optional.ofNullable(byId.get(indexId)).filter(v -> !v.isDeleted());
+    }
+
+    @Override
+    public Optional<VectorIndex> findIncludingDeleted(String indexId) {
       return Optional.ofNullable(byId.get(indexId));
     }
 
     @Override
     public List<VectorIndex> listByBucket(String bucketId) {
-      return byId.values().stream().filter(v -> v.bucketId().equals(bucketId)).toList();
+      return byId.values().stream()
+          .filter(v -> v.bucketId().equals(bucketId) && !v.isDeleted())
+          .toList();
     }
 
     @Override
     public List<VectorIndex> listAll() {
-      return List.copyOf(byId.values());
+      return byId.values().stream().filter(v -> !v.isDeleted()).toList();
     }
 
     @Override
-    public void delete(String indexId) {
+    public List<VectorIndex> listSoftDeletedBefore(java.time.Instant cutoff) {
+      return byId.values().stream()
+          .filter(v -> v.isDeleted() && v.deletedAt().isBefore(cutoff))
+          .toList();
+    }
+
+    @Override
+    public int countAnyByBucket(String bucketId) {
+      return (int) byId.values().stream().filter(v -> v.bucketId().equals(bucketId)).count();
+    }
+
+    @Override
+    public boolean softDelete(String indexId, java.time.Instant at) {
+      VectorIndex existing = byId.get(indexId);
+      if (existing == null || existing.isDeleted()) {
+        return false;
+      }
+      byId.put(
+          indexId,
+          new VectorIndex(
+              existing.indexId(),
+              existing.bucketId(),
+              existing.displayName(),
+              existing.dimension(),
+              existing.metric(),
+              existing.engineParams(),
+              existing.createdAt(),
+              at));
+      return true;
+    }
+
+    @Override
+    public boolean restore(String indexId) {
+      VectorIndex existing = byId.get(indexId);
+      if (existing == null || !existing.isDeleted()) {
+        return false;
+      }
+      byId.put(
+          indexId,
+          VectorIndex.active(
+              existing.indexId(),
+              existing.bucketId(),
+              existing.displayName(),
+              existing.dimension(),
+              existing.metric(),
+              existing.engineParams(),
+              existing.createdAt()));
+      return true;
+    }
+
+    @Override
+    public void hardDelete(String indexId) {
       byId.remove(indexId);
     }
   }

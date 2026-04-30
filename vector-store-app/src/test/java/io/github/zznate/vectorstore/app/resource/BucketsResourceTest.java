@@ -100,7 +100,7 @@ class BucketsResourceTest extends AbstractResourceTest {
 
   @Test
   void duplicateBucketIsConflict() {
-    buckets.create(new Bucket(DEMO_BUCKET, "Existing", clock.instant()));
+    buckets.create(Bucket.active(DEMO_BUCKET, "Existing", clock.instant()));
 
     given()
         .header(ApiKeyAuthenticationFilter.HEADER, ADMIN_TOKEN)
@@ -129,7 +129,7 @@ class BucketsResourceTest extends AbstractResourceTest {
 
   @Test
   void deletingNonEmptyBucketIsConflict() {
-    buckets.create(new Bucket(DEMO_BUCKET, "Demo", clock.instant()));
+    buckets.create(Bucket.active(DEMO_BUCKET, "Demo", clock.instant()));
 
     given()
         .header(ApiKeyAuthenticationFilter.HEADER, ADMIN_TOKEN)

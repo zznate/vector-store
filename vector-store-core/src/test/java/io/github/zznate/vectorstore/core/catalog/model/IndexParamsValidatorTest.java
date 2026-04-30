@@ -141,7 +141,7 @@ class IndexParamsValidatorTest {
       String name = indexId.contains("/") ? indexId.substring(indexId.indexOf('/') + 1) : indexId;
       byId.put(
           indexId,
-          new VectorIndex(
+          VectorIndex.active(
               indexId,
               bucket,
               name,
@@ -159,6 +159,11 @@ class IndexParamsValidatorTest {
 
     @Override
     public Optional<VectorIndex> findById(String indexId) {
+      return Optional.ofNullable(byId.get(indexId)).filter(v -> !v.isDeleted());
+    }
+
+    @Override
+    public Optional<VectorIndex> findIncludingDeleted(String indexId) {
       return Optional.ofNullable(byId.get(indexId));
     }
 
@@ -166,7 +171,7 @@ class IndexParamsValidatorTest {
     public List<VectorIndex> listByBucket(String bucketId) {
       List<VectorIndex> out = new ArrayList<>();
       for (VectorIndex v : byId.values()) {
-        if (v.bucketId().equals(bucketId)) {
+        if (v.bucketId().equals(bucketId) && !v.isDeleted()) {
           out.add(v);
         }
       }
@@ -175,11 +180,78 @@ class IndexParamsValidatorTest {
 
     @Override
     public List<VectorIndex> listAll() {
-      return List.copyOf(byId.values());
+      List<VectorIndex> out = new ArrayList<>();
+      for (VectorIndex v : byId.values()) {
+        if (!v.isDeleted()) {
+          out.add(v);
+        }
+      }
+      return out;
     }
 
     @Override
-    public void delete(String indexId) {
+    public List<VectorIndex> listSoftDeletedBefore(Instant cutoff) {
+      List<VectorIndex> out = new ArrayList<>();
+      for (VectorIndex v : byId.values()) {
+        if (v.isDeleted() && v.deletedAt().isBefore(cutoff)) {
+          out.add(v);
+        }
+      }
+      return out;
+    }
+
+    @Override
+    public int countAnyByBucket(String bucketId) {
+      int n = 0;
+      for (VectorIndex v : byId.values()) {
+        if (v.bucketId().equals(bucketId)) {
+          n++;
+        }
+      }
+      return n;
+    }
+
+    @Override
+    public boolean softDelete(String indexId, Instant at) {
+      VectorIndex existing = byId.get(indexId);
+      if (existing == null || existing.isDeleted()) {
+        return false;
+      }
+      byId.put(
+          indexId,
+          new VectorIndex(
+              existing.indexId(),
+              existing.bucketId(),
+              existing.displayName(),
+              existing.dimension(),
+              existing.metric(),
+              existing.engineParams(),
+              existing.createdAt(),
+              at));
+      return true;
+    }
+
+    @Override
+    public boolean restore(String indexId) {
+      VectorIndex existing = byId.get(indexId);
+      if (existing == null || !existing.isDeleted()) {
+        return false;
+      }
+      byId.put(
+          indexId,
+          VectorIndex.active(
+              existing.indexId(),
+              existing.bucketId(),
+              existing.displayName(),
+              existing.dimension(),
+              existing.metric(),
+              existing.engineParams(),
+              existing.createdAt()));
+      return true;
+    }
+
+    @Override
+    public void hardDelete(String indexId) {
       byId.remove(indexId);
     }
   }

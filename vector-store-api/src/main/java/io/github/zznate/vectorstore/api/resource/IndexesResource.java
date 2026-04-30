@@ -91,7 +91,7 @@ public class IndexesResource {
     }
     VectorIndex index =
         indexes.create(
-            new VectorIndex(
+            VectorIndex.active(
                 qualifiedId,
                 bucketId,
                 request.displayName(),
@@ -132,7 +132,7 @@ public class IndexesResource {
     if (indexes.findById(qualifiedId).isEmpty()) {
       throw new IndexNotFoundException(qualifiedId);
     }
-    indexes.delete(qualifiedId);
+    indexes.hardDelete(qualifiedId);
     manifests.invalidateIndex(qualifiedId);
     cachePolicyResolver.invalidate(qualifiedId);
     cachePolicyEnforcer.invalidateIndex(qualifiedId);

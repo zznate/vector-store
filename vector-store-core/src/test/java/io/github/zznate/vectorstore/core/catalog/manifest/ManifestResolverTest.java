@@ -39,9 +39,10 @@ class ManifestResolverTest {
     resolver = new ManifestResolver(manifests, segments);
 
     Instant t = Instant.now().truncatedTo(ChronoUnit.MILLIS);
-    buckets.create(new Bucket("demo", "Demo", t));
+    buckets.create(Bucket.active("demo", "Demo", t));
     indexes.create(
-        new VectorIndex("demo/products", "demo", "Products", 4, DistanceMetric.COSINE, "{}", t));
+        VectorIndex.active(
+            "demo/products", "demo", "Products", 4, DistanceMetric.COSINE, "{}", t));
   }
 
   @AfterEach

@@ -33,8 +33,9 @@ class StagedTombstoneRepositoryJdbiTest {
     staged = new StagedTombstoneRepositoryJdbi(fixture.jdbi());
 
     Instant t = Instant.now().truncatedTo(ChronoUnit.MILLIS);
-    buckets.create(new Bucket("demo", "Demo", t));
-    indexes.create(new VectorIndex(INDEX_ID, "demo", "Products", 4, DistanceMetric.COSINE, "{}", t));
+    buckets.create(Bucket.active("demo", "Demo", t));
+    indexes.create(
+        VectorIndex.active(INDEX_ID, "demo", "Products", 4, DistanceMetric.COSINE, "{}", t));
   }
 
   @AfterEach
@@ -116,7 +117,7 @@ class StagedTombstoneRepositoryJdbiTest {
     staged.stage(INDEX_ID, List.of("u1", "u2"), Instant.now());
     assertThat(staged.count(INDEX_ID)).isEqualTo(2);
 
-    indexes.delete(INDEX_ID);
+    indexes.hardDelete(INDEX_ID);
 
     assertThat(staged.snapshot(INDEX_ID)).isEmpty();
     assertThat(staged.count(INDEX_ID)).isZero();

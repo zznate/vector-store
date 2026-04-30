@@ -52,7 +52,7 @@ public class BucketsResource {
       throw new BucketAlreadyExistsException(request.bucketId());
     }
     Bucket created =
-        buckets.create(new Bucket(request.bucketId(), request.displayName(), clock.instant()));
+        buckets.create(Bucket.active(request.bucketId(), request.displayName(), clock.instant()));
     return Response.status(Response.Status.CREATED).entity(BucketResponse.from(created)).build();
   }
 
@@ -82,7 +82,7 @@ public class BucketsResource {
     if (!indexes.listByBucket(bucketId).isEmpty()) {
       throw new BucketNotEmptyException(bucketId);
     }
-    buckets.delete(bucketId);
+    buckets.hardDelete(bucketId);
     return Response.noContent().build();
   }
 }

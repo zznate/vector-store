@@ -221,6 +221,6 @@ class CommitCoordinatorHelpersTest {
   }
 
   private VectorIndex index() {
-    return new VectorIndex(INDEX_ID, "demo", "idx", 4, DistanceMetric.COSINE, "{}", NOW);
+    return VectorIndex.active(INDEX_ID, "demo", "idx", 4, DistanceMetric.COSINE, "{}", NOW);
   }
 }

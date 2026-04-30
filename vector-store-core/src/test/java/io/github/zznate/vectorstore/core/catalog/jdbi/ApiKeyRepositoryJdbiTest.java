@@ -24,7 +24,7 @@ class ApiKeyRepositoryJdbiTest {
     BucketRepository buckets = new BucketRepositoryJdbi(fixture.jdbi());
     apiKeys = new ApiKeyRepositoryJdbi(fixture.jdbi());
 
-    buckets.create(new Bucket("demo", "Demo", Instant.now().truncatedTo(ChronoUnit.MILLIS)));
+    buckets.create(Bucket.active("demo", "Demo", Instant.now().truncatedTo(ChronoUnit.MILLIS)));
   }
 
   @AfterEach
