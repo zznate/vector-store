@@ -12,8 +12,10 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Stream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -73,6 +75,50 @@ public class LocalSegmentStore implements SegmentStore, AutoCloseable {
     Path tmp = dir.resolve(fileName + ".tmp");
     Files.write(tmp, content);
     Files.move(tmp, dir.resolve(fileName), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+  }
+
+  @Override
+  public void deletePrefix(String objectPrefix) throws IOException {
+    Path dir = root.resolve(objectPrefix).toAbsolutePath();
+    if (!Files.exists(dir)) {
+      return;
+    }
+    // Drop any cached graph supplier whose path lives under this prefix.
+    // Without this, the memory-mapped reader would keep the underlying
+    // files open on Windows and miscount on Linux post-delete.
+    graphSuppliers
+        .entrySet()
+        .removeIf(
+            entry -> {
+              try {
+                Path graphPath = dir.resolve("graph.jvec");
+                if (Files.exists(graphPath) && entry.getValue() != null) {
+                  entry.getValue().close();
+                  return true;
+                }
+              } catch (IOException e) {
+                if (LOG.isWarnEnabled()) {
+                  LOG.warn(
+                      "failed to close graph supplier {} during deletePrefix({})",
+                      entry.getKey(),
+                      objectPrefix,
+                      e);
+                }
+              }
+              return false;
+            });
+
+    try (Stream<Path> walk = Files.walk(dir)) {
+      walk.sorted(Comparator.reverseOrder()).forEach(LocalSegmentStore::deleteQuietly);
+    }
+  }
+
+  private static void deleteQuietly(Path path) {
+    try {
+      Files.deleteIfExists(path);
+    } catch (IOException e) {
+      throw new UncheckedIOException("failed to delete " + path, e);
+    }
   }
 
   /**

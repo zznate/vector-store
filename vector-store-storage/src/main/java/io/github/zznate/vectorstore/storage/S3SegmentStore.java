@@ -33,7 +33,13 @@ import software.amazon.awssdk.services.s3.model.CompletedMultipartUpload;
 import software.amazon.awssdk.services.s3.model.CompletedPart;
 import software.amazon.awssdk.services.s3.model.CreateMultipartUploadRequest;
 import software.amazon.awssdk.services.s3.model.CreateMultipartUploadResponse;
+import software.amazon.awssdk.services.s3.model.Delete;
+import software.amazon.awssdk.services.s3.model.DeleteObjectsRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
+import software.amazon.awssdk.services.s3.model.NoSuchBucketException;
+import software.amazon.awssdk.services.s3.model.ObjectIdentifier;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.UploadPartRequest;
 import software.amazon.awssdk.services.s3.model.UploadPartResponse;
@@ -155,6 +161,51 @@ public class S3SegmentStore implements SegmentStore, AutoCloseable {
     s3Client.putObject(
         PutObjectRequest.builder().bucket(bucket).key(key).build(),
         RequestBody.fromBytes(content));
+  }
+
+  /**
+   * List every object under {@code objectPrefix} and remove them in batches
+   * of up to 1000 keys per {@code DeleteObjects} call (the S3 hard limit).
+   * Idempotent: missing prefix is a no-op. Cached graph suppliers under the
+   * prefix are dropped first so subsequent reads do not return stale data.
+   */
+  @Override
+  public void deletePrefix(String objectPrefix) {
+    String prefix = stripTrailingSlash(objectPrefix) + "/";
+    graphSuppliers.entrySet().removeIf(entry -> entry.getKey().startsWith(prefix));
+
+    String continuationToken = null;
+    do {
+      ListObjectsV2Request.Builder listRequest =
+          ListObjectsV2Request.builder().bucket(bucket).prefix(prefix);
+      if (continuationToken != null) {
+        listRequest.continuationToken(continuationToken);
+      }
+      ListObjectsV2Response listResponse;
+      try {
+        listResponse = s3Client.listObjectsV2(listRequest.build());
+      } catch (NoSuchBucketException e) {
+        // Bucket itself is gone — nothing to clean up.
+        if (LOG.isDebugEnabled()) {
+          LOG.debug("deletePrefix({}): bucket {} absent, treating as no-op", prefix, bucket, e);
+        }
+        return;
+      }
+      List<ObjectIdentifier> ids = new ArrayList<>(listResponse.contents().size());
+      for (var s3Object : listResponse.contents()) {
+        ids.add(ObjectIdentifier.builder().key(s3Object.key()).build());
+      }
+      if (!ids.isEmpty()) {
+        s3Client.deleteObjects(
+            DeleteObjectsRequest.builder()
+                .bucket(bucket)
+                .delete(Delete.builder().objects(ids).build())
+                .build());
+      }
+      continuationToken = Boolean.TRUE.equals(listResponse.isTruncated())
+          ? listResponse.nextContinuationToken()
+          : null;
+    } while (continuationToken != null);
   }
 
   /**

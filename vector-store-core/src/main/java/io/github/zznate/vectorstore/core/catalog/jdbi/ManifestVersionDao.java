@@ -38,4 +38,7 @@ interface ManifestVersionDao {
        LIMIT 1024
       """)
   List<ManifestVersion> listByIndex(@Bind("indexId") String indexId);
+
+  @SqlUpdate("DELETE FROM manifest_version WHERE index_id = :indexId")
+  int deleteByIndex(@Bind("indexId") String indexId);
 }

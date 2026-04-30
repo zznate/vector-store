@@ -25,4 +25,12 @@ public interface ManifestVersionRepository {
    * {@code project_rest_data_management.md} in project memory.
    */
   List<ManifestVersion> listByIndex(String indexId);
+
+  /**
+   * Drop every manifest_version row owned by {@code indexId}.
+   *
+   * <p>Caller invariant: <b>retention sweep only</b>, during index hard
+   * delete after segment cleanup. Returns the number of rows removed.
+   */
+  int deleteByIndex(String indexId);
 }

@@ -31,4 +31,9 @@ public class ManifestVersionRepositoryJdbi implements ManifestVersionRepository 
   public List<ManifestVersion> listByIndex(String indexId) {
     return jdbi.withExtension(ManifestVersionDao.class, dao -> dao.listByIndex(indexId));
   }
+
+  @Override
+  public int deleteByIndex(String indexId) {
+    return jdbi.withExtension(ManifestVersionDao.class, dao -> dao.deleteByIndex(indexId));
+  }
 }

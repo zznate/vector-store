@@ -49,4 +49,17 @@ public interface SegmentStore {
    * caller's responsibility to serialise.
    */
   void putSidecar(Segment segment, String fileName, byte[] content) throws IOException;
+
+  /**
+   * Recursively remove every object whose key starts with {@code
+   * objectPrefix}. Used by the retention sweep to drop a segment's
+   * graph + sidecars when its parent index hard-deletes.
+   *
+   * <p>Idempotent: deleting a prefix that does not exist is a no-op,
+   * not an error. Implementations may release any cached graph mappings
+   * for segments under the prefix before removing files; callers must
+   * not call this concurrently with active queries against the same
+   * segment id.
+   */
+  void deletePrefix(String objectPrefix) throws IOException;
 }

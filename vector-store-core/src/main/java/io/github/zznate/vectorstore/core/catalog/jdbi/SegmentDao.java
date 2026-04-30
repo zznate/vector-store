@@ -53,4 +53,7 @@ interface SegmentDao {
 
   @SqlUpdate("DELETE FROM segment WHERE segment_id = :segmentId")
   void delete(@Bind("segmentId") String segmentId);
+
+  @SqlUpdate("DELETE FROM segment WHERE index_id = :indexId")
+  int deleteByIndex(@Bind("indexId") String indexId);
 }

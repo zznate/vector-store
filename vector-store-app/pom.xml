@@ -81,6 +81,12 @@
       <artifactId>quarkus-micrometer-registry-prometheus</artifactId>
     </dependency>
 
+    <!-- Background scheduling (retention sweep) -->
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-scheduler</artifactId>
+    </dependency>
+
     <!-- Observability -->
     <dependency>
       <groupId>io.quarkus</groupId>

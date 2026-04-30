@@ -48,4 +48,9 @@ public class SegmentRepositoryJdbi implements SegmentRepository {
   public void delete(String segmentId) {
     jdbi.useExtension(SegmentDao.class, dao -> dao.delete(segmentId));
   }
+
+  @Override
+  public int deleteByIndex(String indexId) {
+    return jdbi.withExtension(SegmentDao.class, dao -> dao.deleteByIndex(indexId));
+  }
 }

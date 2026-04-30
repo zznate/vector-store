@@ -35,4 +35,15 @@ public interface SegmentRepository {
   void updateStateAndBytes(String segmentId, SegmentState state, long bytes);
 
   void delete(String segmentId);
+
+  /**
+   * Drop every segment row owned by {@code indexId}.
+   *
+   * <p>Caller invariant: <b>retention sweep only</b>. Used during index
+   * hard-delete after object-store cleanup has run for each prefix.
+   * Returns the number of rows removed. Production REST paths must not
+   * call this — they use per-segment lifecycle ops on individual
+   * commits.
+   */
+  int deleteByIndex(String indexId);
 }
