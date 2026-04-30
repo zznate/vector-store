@@ -67,6 +67,22 @@ class VectorIndexRepositoryJdbiTest {
   }
 
   @Test
+  void listAllReturnsEveryIndexAcrossBucketsOrderedByCreatedAt() {
+    buckets.create(new Bucket("other", "Other", Instant.now().truncatedTo(ChronoUnit.MILLIS)));
+    Instant t = Instant.parse("2026-04-01T00:00:00Z");
+    indexes.create(
+        new VectorIndex("demo/a", "demo", "A", 4, DistanceMetric.COSINE, "{}", t));
+    indexes.create(
+        new VectorIndex("other/c", "other", "C", 4, DistanceMetric.EUCLIDEAN, "{}", t.plusSeconds(1)));
+    indexes.create(
+        new VectorIndex("demo/b", "demo", "B", 4, DistanceMetric.COSINE, "{}", t.plusSeconds(2)));
+
+    assertThat(indexes.listAll())
+        .extracting(VectorIndex::indexId)
+        .containsExactly("demo/a", "other/c", "demo/b");
+  }
+
+  @Test
   void deleteRemovesTheIndex() {
     indexes.create(
         new VectorIndex(

@@ -39,6 +39,14 @@ interface VectorIndexDao {
       """)
   List<VectorIndex> listByBucket(@Bind("bucketId") String bucketId);
 
+  @SqlQuery(
+      """
+      SELECT index_id, bucket_id, display_name, dimension, metric, engine_params, created_at
+        FROM vector_index
+       ORDER BY created_at
+      """)
+  List<VectorIndex> listAll();
+
   @SqlUpdate("DELETE FROM vector_index WHERE index_id = :indexId")
   void delete(@Bind("indexId") String indexId);
 }

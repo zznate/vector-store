@@ -146,6 +146,11 @@ class CachePolicyResolverTest {
     }
 
     @Override
+    public List<VectorIndex> listAll() {
+      return List.copyOf(byId.values());
+    }
+
+    @Override
     public void delete(String indexId) {
       byId.remove(indexId);
     }

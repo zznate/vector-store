@@ -33,6 +33,11 @@ public class VectorIndexRepositoryJdbi implements VectorIndexRepository {
   }
 
   @Override
+  public List<VectorIndex> listAll() {
+    return jdbi.withExtension(VectorIndexDao.class, VectorIndexDao::listAll);
+  }
+
+  @Override
   public void delete(String indexId) {
     jdbi.useExtension(VectorIndexDao.class, dao -> dao.delete(indexId));
   }
