@@ -117,15 +117,38 @@ public record IndexBuildParams(
   }
 
   /**
-   * Defaults from {@code docs/design-notes.md}: {@code M=32},
-   * {@code beamWidth=200}, {@code neighborOverflow=1.2}, {@code alpha=1.2},
-   * {@code pqSubspaces=128}, {@code pqSubspaceClusters=256},
-   * {@code addHierarchy=false}, {@code cachePolicy=SMART},
-   * {@code cacheBytes=null}.
+   * Hardcoded defaults: {@code M=32}, {@code beamWidth=200},
+   * {@code neighborOverflow=1.2}, {@code alpha=1.2}, {@code pqSubspaces=128},
+   * {@code pqSubspaceClusters=256}, {@code addHierarchy=false},
+   * {@code cachePolicy=SMART}, {@code cacheBytes=null}.
+   *
+   * <p>Used by tests and engine-internal code paths that have no access
+   * to the CDI-provided {@link IndexBuildParamsDefaults}. Production
+   * code that creates indexes (the API resource) should resolve
+   * defaults via {@link #defaults(IndexBuildParamsDefaults)} so that
+   * env-var / config overrides are honoured.
    */
   public static IndexBuildParams defaults() {
     return new IndexBuildParams(
         32, 200, 1.2f, 1.2f, 128, 256, false, CachePolicy.defaultPolicy(), null);
+  }
+
+  /**
+   * Build an instance from the per-process config mapping. {@code cacheBytes}
+   * is left {@code null} — it is a per-index opt-in hint with no global
+   * default.
+   */
+  public static IndexBuildParams defaults(IndexBuildParamsDefaults config) {
+    return new IndexBuildParams(
+        config.m(),
+        config.beamWidth(),
+        config.neighborOverflow(),
+        config.alpha(),
+        config.pqSubspaces(),
+        config.pqSubspaceClusters(),
+        config.addHierarchy(),
+        config.cachePolicy(),
+        null);
   }
 
   private static final ObjectMapper MAPPER =
@@ -159,7 +182,19 @@ public record IndexBuildParams(
    * maps return defaults verbatim.
    */
   public static IndexBuildParams fromOverrides(Map<String, Object> overrides) {
-    Map<String, Object> merged = MAPPER.convertValue(defaults(), MAP_TYPE);
+    return fromOverrides(overrides, defaults());
+  }
+
+  /**
+   * Like {@link #fromOverrides(Map)} but layers the caller's
+   * {@code overrides} over an explicit {@code base}. Resources that
+   * resolve defaults from the {@link IndexBuildParamsDefaults} config
+   * mapping pass the result of {@link #defaults(IndexBuildParamsDefaults)}
+   * here so env-var / system-property overrides flow through.
+   */
+  public static IndexBuildParams fromOverrides(
+      Map<String, Object> overrides, IndexBuildParams base) {
+    Map<String, Object> merged = MAPPER.convertValue(base, MAP_TYPE);
     if (overrides != null && !overrides.isEmpty()) {
       merged.putAll(overrides);
     }

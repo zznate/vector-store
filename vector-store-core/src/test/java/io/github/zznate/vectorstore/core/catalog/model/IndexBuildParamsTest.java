@@ -102,4 +102,52 @@ class IndexBuildParamsTest {
     assertThat(IndexBuildParams.fromJson("")).isEqualTo(IndexBuildParams.defaults());
     assertThat(IndexBuildParams.fromJson(null)).isEqualTo(IndexBuildParams.defaults());
   }
+
+  @Test
+  void defaultsFromConfigBuildsFromMappingValues() {
+    IndexBuildParamsDefaults config =
+        new StubDefaults(64, 400, 1.5f, 1.4f, 64, 128, true, CachePolicy.RESIDENT);
+    IndexBuildParams params = IndexBuildParams.defaults(config);
+    assertThat(params.m()).isEqualTo(64);
+    assertThat(params.beamWidth()).isEqualTo(400);
+    assertThat(params.neighborOverflow()).isEqualTo(1.5f);
+    assertThat(params.alpha()).isEqualTo(1.4f);
+    assertThat(params.pqSubspaces()).isEqualTo(64);
+    assertThat(params.pqSubspaceClusters()).isEqualTo(128);
+    assertThat(params.addHierarchy()).isTrue();
+    assertThat(params.cachePolicy()).isEqualTo(CachePolicy.RESIDENT);
+    assertThat(params.cacheBytes()).isNull();
+  }
+
+  @Test
+  void fromOverridesWithExplicitBaseLayersOverridesOnTop() {
+    IndexBuildParams base =
+        new IndexBuildParams(64, 400, 1.5f, 1.4f, 64, 128, true, CachePolicy.RESIDENT, null);
+    Map<String, Object> overrides = Map.of("m", 16, "addHierarchy", false);
+    IndexBuildParams merged = IndexBuildParams.fromOverrides(overrides, base);
+    assertThat(merged.m()).isEqualTo(16);
+    assertThat(merged.addHierarchy()).isFalse();
+    assertThat(merged.beamWidth()).isEqualTo(400);
+    assertThat(merged.cachePolicy()).isEqualTo(CachePolicy.RESIDENT);
+  }
+
+  @Test
+  void fromOverridesWithEmptyMapReturnsBaseVerbatim() {
+    IndexBuildParams base =
+        new IndexBuildParams(64, 400, 1.5f, 1.4f, 64, 128, true, CachePolicy.RESIDENT, null);
+    assertThat(IndexBuildParams.fromOverrides(Map.of(), base)).isEqualTo(base);
+    assertThat(IndexBuildParams.fromOverrides(null, base)).isEqualTo(base);
+  }
+
+  /** Plain-Java stub of the SmallRye {@link IndexBuildParamsDefaults} mapping. */
+  private record StubDefaults(
+      int m,
+      int beamWidth,
+      float neighborOverflow,
+      float alpha,
+      int pqSubspaces,
+      int pqSubspaceClusters,
+      boolean addHierarchy,
+      CachePolicy cachePolicy)
+      implements IndexBuildParamsDefaults {}
 }

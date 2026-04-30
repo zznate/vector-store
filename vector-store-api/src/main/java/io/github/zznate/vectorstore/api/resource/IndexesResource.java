@@ -9,6 +9,8 @@ import io.github.zznate.vectorstore.api.error.IndexAlreadyExistsException;
 import io.github.zznate.vectorstore.api.error.IndexNotFoundException;
 import io.github.zznate.vectorstore.core.cache.CachePolicyResolver;
 import io.github.zznate.vectorstore.core.catalog.manifest.ManifestCache;
+import io.github.zznate.vectorstore.core.catalog.model.IndexBuildParams;
+import io.github.zznate.vectorstore.core.catalog.model.IndexBuildParamsDefaults;
 import io.github.zznate.vectorstore.core.catalog.model.VectorIndex;
 import io.github.zznate.vectorstore.core.catalog.repository.BucketRepository;
 import io.github.zznate.vectorstore.core.catalog.repository.VectorIndexRepository;
@@ -51,6 +53,7 @@ public class IndexesResource {
   private final CommitCoordinator commitCoordinator;
   private final Clock clock;
   private final ObjectMapper objectMapper;
+  private final IndexBuildParamsDefaults paramsDefaults;
 
   @SuppressWarnings("PMD.ExcessiveParameterList")
   @Inject
@@ -63,7 +66,8 @@ public class IndexesResource {
       WriteBuffer writeBuffer,
       CommitCoordinator commitCoordinator,
       Clock clock,
-      ObjectMapper objectMapper) {
+      ObjectMapper objectMapper,
+      IndexBuildParamsDefaults paramsDefaults) {
     this.buckets = buckets;
     this.indexes = indexes;
     this.manifests = manifests;
@@ -73,6 +77,7 @@ public class IndexesResource {
     this.commitCoordinator = commitCoordinator;
     this.clock = clock;
     this.objectMapper = objectMapper;
+    this.paramsDefaults = paramsDefaults;
   }
 
   @POST
@@ -154,16 +159,17 @@ public class IndexesResource {
   }
 
   private String writeEngineParams(Map<String, Object> userOverrides) {
-    // Merge user input with IndexBuildParams defaults, then persist the
-    // canonical typed form. Storing the merged result means every later
-    // read gets the full parameter set without re-applying defaults.
-    return io.github.zznate.vectorstore.core.catalog.model.IndexBuildParams.fromOverrides(
-            userOverrides)
+    // Merge user input over the per-process config defaults and persist
+    // the canonical typed form. Storing the merged result means every
+    // later read gets the full parameter set without re-applying defaults
+    // — and changing process-level defaults later does not retroactively
+    // shift already-created indexes.
+    return IndexBuildParams.fromOverrides(userOverrides, IndexBuildParams.defaults(paramsDefaults))
         .toJson();
   }
 
   private Map<String, Object> readEngineParams(String json) {
-    return io.github.zznate.vectorstore.core.catalog.model.IndexBuildParams.fromJson(json).toMap();
+    return IndexBuildParams.fromJson(json).toMap();
   }
 
   private static String qualify(String bucketId, String indexId) {
