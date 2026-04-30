@@ -128,6 +128,51 @@ class BucketsResourceTest extends AbstractResourceTest {
   }
 
   @Test
+  void deleteSoftDeletesBucketAndSubsequentReadsAreNotFound() {
+    buckets.create(Bucket.active(DEMO_BUCKET, "Demo", clock.instant()));
+
+    given()
+        .header(ApiKeyAuthenticationFilter.HEADER, ADMIN_TOKEN)
+        .when()
+        .delete("/v1/buckets/demo")
+        .then()
+        .statusCode(204);
+
+    // GET filters soft-deleted -> 404
+    given()
+        .header(ApiKeyAuthenticationFilter.HEADER, ADMIN_TOKEN)
+        .when()
+        .get("/v1/buckets/demo")
+        .then()
+        .statusCode(404)
+        .body("error", is("bucket_not_found"));
+
+    // Catalog row still exists with deletedAt set (visible only via
+    // findIncludingDeleted, which is the bounded-caller path).
+    org.assertj.core.api.Assertions.assertThat(buckets.findIncludingDeleted(DEMO_BUCKET))
+        .hasValueSatisfying(b -> org.assertj.core.api.Assertions.assertThat(b.isDeleted()).isTrue());
+  }
+
+  @Test
+  void recreatingABucketInRetentionIsConflict() {
+    buckets.create(Bucket.active(DEMO_BUCKET, "Demo", clock.instant()));
+    buckets.softDelete(DEMO_BUCKET, clock.instant());
+
+    given()
+        .header(ApiKeyAuthenticationFilter.HEADER, ADMIN_TOKEN)
+        .contentType(ContentType.JSON)
+        .body(
+            """
+            {"bucketId":"demo","displayName":"Reused"}
+            """)
+        .when()
+        .post("/v1/buckets")
+        .then()
+        .statusCode(409)
+        .body("error", is("bucket_in_retention"));
+  }
+
+  @Test
   void deletingNonEmptyBucketIsConflict() {
     buckets.create(Bucket.active(DEMO_BUCKET, "Demo", clock.instant()));
 

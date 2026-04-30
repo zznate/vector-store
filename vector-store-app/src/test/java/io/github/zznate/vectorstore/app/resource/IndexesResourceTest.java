@@ -8,9 +8,11 @@ import static org.hamcrest.Matchers.is;
 import io.github.zznate.vectorstore.api.auth.ApiKeyAuthenticationFilter;
 import io.github.zznate.vectorstore.core.catalog.model.Bucket;
 import io.github.zznate.vectorstore.core.catalog.repository.BucketRepository;
+import io.github.zznate.vectorstore.core.catalog.repository.VectorIndexRepository;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.http.ContentType;
 import jakarta.inject.Inject;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -18,6 +20,7 @@ import org.junit.jupiter.api.Test;
 class IndexesResourceTest extends AbstractResourceTest {
 
   @Inject BucketRepository buckets;
+  @Inject VectorIndexRepository indexes;
 
   @BeforeEach
   void seedBuckets() {
@@ -114,6 +117,74 @@ class IndexesResourceTest extends AbstractResourceTest {
         .then()
         .statusCode(200)
         .body("$", empty());
+  }
+
+  @Test
+  void deleteSoftDeletesIndexAndSubsequentReadsAreNotFound() {
+    given()
+        .header(ApiKeyAuthenticationFilter.HEADER, ADMIN_TOKEN)
+        .contentType(ContentType.JSON)
+        .body(
+            """
+            {"indexId":"products","displayName":"Products","dimension":4,"metric":"COSINE","engineParams":{}}
+            """)
+        .when()
+        .post("/v1/buckets/demo/indexes")
+        .then()
+        .statusCode(201);
+
+    given()
+        .header(ApiKeyAuthenticationFilter.HEADER, ADMIN_TOKEN)
+        .when()
+        .delete("/v1/buckets/demo/indexes/products")
+        .then()
+        .statusCode(204);
+
+    given()
+        .header(ApiKeyAuthenticationFilter.HEADER, ADMIN_TOKEN)
+        .when()
+        .get("/v1/buckets/demo/indexes/products")
+        .then()
+        .statusCode(404)
+        .body("error", is("index_not_found"));
+
+    Assertions.assertThat(indexes.findIncludingDeleted("demo/products"))
+        .hasValueSatisfying(idx -> Assertions.assertThat(idx.isDeleted()).isTrue());
+  }
+
+  @Test
+  void recreatingAnIndexInRetentionIsConflict() {
+    given()
+        .header(ApiKeyAuthenticationFilter.HEADER, ADMIN_TOKEN)
+        .contentType(ContentType.JSON)
+        .body(
+            """
+            {"indexId":"products","displayName":"Products","dimension":4,"metric":"COSINE","engineParams":{}}
+            """)
+        .when()
+        .post("/v1/buckets/demo/indexes")
+        .then()
+        .statusCode(201);
+
+    given()
+        .header(ApiKeyAuthenticationFilter.HEADER, ADMIN_TOKEN)
+        .when()
+        .delete("/v1/buckets/demo/indexes/products")
+        .then()
+        .statusCode(204);
+
+    given()
+        .header(ApiKeyAuthenticationFilter.HEADER, ADMIN_TOKEN)
+        .contentType(ContentType.JSON)
+        .body(
+            """
+            {"indexId":"products","displayName":"Reused","dimension":4,"metric":"COSINE","engineParams":{}}
+            """)
+        .when()
+        .post("/v1/buckets/demo/indexes")
+        .then()
+        .statusCode(409)
+        .body("error", is("index_in_retention"));
   }
 
   @Test

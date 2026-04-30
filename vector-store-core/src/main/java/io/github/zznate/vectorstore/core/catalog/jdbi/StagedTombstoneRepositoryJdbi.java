@@ -50,4 +50,9 @@ public class StagedTombstoneRepositoryJdbi implements StagedTombstoneRepository 
   public int count(String indexId) {
     return jdbi.withExtension(StagedTombstoneDao.class, dao -> dao.count(indexId));
   }
+
+  @Override
+  public int clearForIndex(String indexId) {
+    return jdbi.withExtension(StagedTombstoneDao.class, dao -> dao.clearForIndex(indexId));
+  }
 }

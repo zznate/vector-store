@@ -6,6 +6,7 @@ import io.github.zznate.vectorstore.api.dto.CreateIndexRequest;
 import io.github.zznate.vectorstore.api.dto.IndexResponse;
 import io.github.zznate.vectorstore.api.error.BucketNotFoundException;
 import io.github.zznate.vectorstore.api.error.IndexAlreadyExistsException;
+import io.github.zznate.vectorstore.api.error.IndexInRetentionException;
 import io.github.zznate.vectorstore.api.error.IndexNotFoundException;
 import io.github.zznate.vectorstore.core.cache.CachePolicyResolver;
 import io.github.zznate.vectorstore.core.catalog.manifest.ManifestCache;
@@ -13,6 +14,7 @@ import io.github.zznate.vectorstore.core.catalog.model.IndexBuildParams;
 import io.github.zznate.vectorstore.core.catalog.model.IndexBuildParamsDefaults;
 import io.github.zznate.vectorstore.core.catalog.model.VectorIndex;
 import io.github.zznate.vectorstore.core.catalog.repository.BucketRepository;
+import io.github.zznate.vectorstore.core.catalog.repository.StagedTombstoneRepository;
 import io.github.zznate.vectorstore.core.catalog.repository.VectorIndexRepository;
 import io.github.zznate.vectorstore.engine.buffer.WriteBuffer;
 import io.github.zznate.vectorstore.engine.commit.CommitCoordinator;
@@ -46,6 +48,7 @@ public class IndexesResource {
 
   private final BucketRepository buckets;
   private final VectorIndexRepository indexes;
+  private final StagedTombstoneRepository stagedTombstones;
   private final ManifestCache manifests;
   private final CachePolicyResolver cachePolicyResolver;
   private final CachePolicyEnforcer cachePolicyEnforcer;
@@ -60,6 +63,7 @@ public class IndexesResource {
   public IndexesResource(
       BucketRepository buckets,
       VectorIndexRepository indexes,
+      StagedTombstoneRepository stagedTombstones,
       ManifestCache manifests,
       CachePolicyResolver cachePolicyResolver,
       CachePolicyEnforcer cachePolicyEnforcer,
@@ -70,6 +74,7 @@ public class IndexesResource {
       IndexBuildParamsDefaults paramsDefaults) {
     this.buckets = buckets;
     this.indexes = indexes;
+    this.stagedTombstones = stagedTombstones;
     this.manifests = manifests;
     this.cachePolicyResolver = cachePolicyResolver;
     this.cachePolicyEnforcer = cachePolicyEnforcer;
@@ -86,9 +91,15 @@ public class IndexesResource {
       @PathParam("bucket") String bucketId, @Valid CreateIndexRequest request) {
     requireBucket(bucketId);
     String qualifiedId = qualify(bucketId, request.indexId());
-    if (indexes.findById(qualifiedId).isPresent()) {
-      throw new IndexAlreadyExistsException(qualifiedId);
-    }
+    indexes
+        .findIncludingDeleted(qualifiedId)
+        .ifPresent(
+            existing -> {
+              if (existing.isDeleted()) {
+                throw new IndexInRetentionException(qualifiedId, existing.deletedAt());
+              }
+              throw new IndexAlreadyExistsException(qualifiedId);
+            });
     VectorIndex index =
         indexes.create(
             VectorIndex.active(
@@ -122,9 +133,21 @@ public class IndexesResource {
         .orElseThrow(() -> new IndexNotFoundException(qualifiedId));
   }
 
+  /**
+   * Soft-deletes an index. The catalog row stays with {@code deleted_at}
+   * set; segments, manifest_versions, and object-store data remain
+   * untouched until the retention sweep hard-deletes the index after the
+   * configured window has elapsed.
+   *
+   * <p>All index-keyed caches (manifest, cache-policy resolver / enforcer,
+   * write buffer, commit coordinator) are invalidated immediately so the
+   * soft-deleted index is unreachable through any cached path. Pending
+   * writes in the buffer and any in-flight commit state for this index
+   * are dropped.
+   */
   @DELETE
   @Path("/{index}")
-  @Operation(summary = "Delete an index")
+  @Operation(summary = "Soft-delete an index")
   public Response delete(
       @PathParam("bucket") String bucketId, @PathParam("index") String indexId) {
     requireBucket(bucketId);
@@ -132,7 +155,8 @@ public class IndexesResource {
     if (indexes.findById(qualifiedId).isEmpty()) {
       throw new IndexNotFoundException(qualifiedId);
     }
-    indexes.hardDelete(qualifiedId);
+    indexes.softDelete(qualifiedId, clock.instant());
+    stagedTombstones.clearForIndex(qualifiedId);
     manifests.invalidateIndex(qualifiedId);
     cachePolicyResolver.invalidate(qualifiedId);
     cachePolicyEnforcer.invalidateIndex(qualifiedId);

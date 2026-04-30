@@ -35,4 +35,12 @@ public interface StagedTombstoneRepository {
 
   /** Count of staged rows for {@code indexId}. */
   int count(String indexId);
+
+  /**
+   * Drop every staged row for {@code indexId}. Called from the index
+   * soft-delete path so a soft-deleted index has no pending tombstones
+   * waiting to be drained — consistent with the write-buffer invalidation
+   * that fires alongside it. Returns the number of rows removed.
+   */
+  int clearForIndex(String indexId);
 }

@@ -12,6 +12,7 @@ import jakarta.ws.rs.core.Response.Status;
 public sealed class VectorStoreException extends RuntimeException
     permits AmbiguousFilterHttpException,
         BucketAlreadyExistsException,
+        BucketInRetentionException,
         BucketNotEmptyException,
         BucketNotFoundException,
         CommitFailedHttpException,
@@ -19,6 +20,7 @@ public sealed class VectorStoreException extends RuntimeException
         EmptyCommitHttpException,
         ForbiddenException,
         IndexAlreadyExistsException,
+        IndexInRetentionException,
         IndexNotFoundException,
         NotImplementedException,
         UnauthorizedException,

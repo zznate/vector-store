@@ -6,6 +6,7 @@ import java.util.Optional;
 import org.jdbi.v3.sqlobject.customizer.Bind;
 import org.jdbi.v3.sqlobject.statement.SqlBatch;
 import org.jdbi.v3.sqlobject.statement.SqlQuery;
+import org.jdbi.v3.sqlobject.statement.SqlUpdate;
 
 interface StagedTombstoneDao {
 
@@ -40,4 +41,7 @@ interface StagedTombstoneDao {
 
   @SqlQuery("SELECT COUNT(*) FROM staged_tombstone WHERE index_id = :indexId")
   int count(@Bind("indexId") String indexId);
+
+  @SqlUpdate("DELETE FROM staged_tombstone WHERE index_id = :indexId")
+  int clearForIndex(@Bind("indexId") String indexId);
 }

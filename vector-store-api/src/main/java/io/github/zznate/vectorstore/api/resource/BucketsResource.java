@@ -4,6 +4,7 @@ import io.github.zznate.vectorstore.api.auth.AdminOnly;
 import io.github.zznate.vectorstore.api.dto.BucketResponse;
 import io.github.zznate.vectorstore.api.dto.CreateBucketRequest;
 import io.github.zznate.vectorstore.api.error.BucketAlreadyExistsException;
+import io.github.zznate.vectorstore.api.error.BucketInRetentionException;
 import io.github.zznate.vectorstore.api.error.BucketNotEmptyException;
 import io.github.zznate.vectorstore.api.error.BucketNotFoundException;
 import io.github.zznate.vectorstore.core.catalog.model.Bucket;
@@ -48,9 +49,15 @@ public class BucketsResource {
   @POST
   @Operation(summary = "Create a bucket")
   public Response create(@Valid CreateBucketRequest request) {
-    if (buckets.findById(request.bucketId()).isPresent()) {
-      throw new BucketAlreadyExistsException(request.bucketId());
-    }
+    buckets
+        .findIncludingDeleted(request.bucketId())
+        .ifPresent(
+            existing -> {
+              if (existing.isDeleted()) {
+                throw new BucketInRetentionException(request.bucketId(), existing.deletedAt());
+              }
+              throw new BucketAlreadyExistsException(request.bucketId());
+            });
     Bucket created =
         buckets.create(Bucket.active(request.bucketId(), request.displayName(), clock.instant()));
     return Response.status(Response.Status.CREATED).entity(BucketResponse.from(created)).build();
@@ -72,9 +79,22 @@ public class BucketsResource {
         .orElseThrow(() -> new BucketNotFoundException(bucketId));
   }
 
+  /**
+   * Soft-deletes a bucket. The row stays in the catalog with {@code
+   * deleted_at} set; the retention sweep hard-deletes it once the configured
+   * window has elapsed and no child indexes remain.
+   *
+   * <p>Refuses if the bucket has active indexes — children must be
+   * soft-deleted first. The empty-check is deliberately scoped to
+   * <em>active</em> indexes (via {@link
+   * io.github.zznate.vectorstore.core.catalog.repository.VectorIndexRepository#listByBucket
+   * listByBucket}, which filters {@code deleted_at IS NULL}). Already
+   * soft-deleted indexes do not block bucket soft-delete; the sweep
+   * coordinates the eventual hard-delete ordering separately.
+   */
   @DELETE
   @Path("/{bucket}")
-  @Operation(summary = "Delete a bucket (must be empty)")
+  @Operation(summary = "Soft-delete a bucket (must have no active indexes)")
   public Response delete(@PathParam("bucket") String bucketId) {
     if (buckets.findById(bucketId).isEmpty()) {
       throw new BucketNotFoundException(bucketId);
@@ -82,7 +102,7 @@ public class BucketsResource {
     if (!indexes.listByBucket(bucketId).isEmpty()) {
       throw new BucketNotEmptyException(bucketId);
     }
-    buckets.hardDelete(bucketId);
+    buckets.softDelete(bucketId, clock.instant());
     return Response.noContent().build();
   }
 }

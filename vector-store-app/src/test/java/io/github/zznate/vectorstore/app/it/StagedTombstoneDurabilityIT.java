@@ -173,7 +173,7 @@ class StagedTombstoneDurabilityIT extends AbstractResourceTest {
   }
 
   @Test
-  void indexDeletionCascadesStagingRows() {
+  void softDeleteOfIndexClearsStagingRows() {
     String indexName = "cascade-staging";
     createIndex(indexName);
     String qualifiedIndexId = BUCKET + "/" + indexName;
@@ -188,6 +188,11 @@ class StagedTombstoneDurabilityIT extends AbstractResourceTest {
         .statusCode(204);
     assertThat(stagedRepo.count(qualifiedIndexId)).isEqualTo(2);
 
+    // DELETE soft-deletes the index, so the FK ON DELETE CASCADE on
+    // staged_tombstone does NOT fire; the resource clears staging rows
+    // explicitly to keep a soft-deleted index unreachable through any
+    // pending state. Hard-delete (sweep) still relies on the FK cascade
+    // for any rows that somehow survived.
     given()
         .header(ApiKeyAuthenticationFilter.HEADER, ADMIN_TOKEN)
         .when()
@@ -196,7 +201,7 @@ class StagedTombstoneDurabilityIT extends AbstractResourceTest {
         .statusCode(204);
 
     assertThat(stagedRepo.count(qualifiedIndexId))
-        .as("ON DELETE CASCADE clears staging rows alongside the index")
+        .as("Soft-delete clears staging rows so a soft-deleted index has no pending state")
         .isZero();
   }
 
