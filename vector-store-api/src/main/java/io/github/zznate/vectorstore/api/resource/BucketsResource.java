@@ -3,6 +3,7 @@ package io.github.zznate.vectorstore.api.resource;
 import io.github.zznate.vectorstore.api.auth.AdminOnly;
 import io.github.zznate.vectorstore.api.dto.BucketResponse;
 import io.github.zznate.vectorstore.api.dto.CreateBucketRequest;
+import io.github.zznate.vectorstore.api.error.BucketAlreadyActiveException;
 import io.github.zznate.vectorstore.api.error.BucketAlreadyExistsException;
 import io.github.zznate.vectorstore.api.error.BucketInRetentionException;
 import io.github.zznate.vectorstore.api.error.BucketNotEmptyException;
@@ -104,5 +105,36 @@ public class BucketsResource {
     }
     buckets.softDelete(bucketId, clock.instant());
     return Response.noContent().build();
+  }
+
+  /**
+   * Restores a soft-deleted bucket by clearing its {@code deleted_at}.
+   * Returns the restored bucket with 200 OK.
+   *
+   * <p>Bucket restore does <em>not</em> cascade down to child indexes —
+   * each soft-deleted index must be restored explicitly. Restoring a
+   * bucket whose indexes are still soft-deleted is fine; the bucket
+   * becomes addressable again, and the indexes remain hidden until
+   * their own restore endpoint is invoked.
+   *
+   * <p>404 if the bucket id never existed or has been hard-deleted past
+   * retention (deliberately conflated so retention windows do not leak
+   * to clients). 409 if the bucket is already active.
+   */
+  @POST
+  @Path("/{bucket}:restore")
+  @Consumes(MediaType.WILDCARD)
+  @Operation(summary = "Restore a soft-deleted bucket")
+  public BucketResponse restore(@PathParam("bucket") String bucketId) {
+    Bucket existing =
+        buckets.findIncludingDeleted(bucketId).orElseThrow(() -> new BucketNotFoundException(bucketId));
+    if (!existing.isDeleted()) {
+      throw new BucketAlreadyActiveException(bucketId);
+    }
+    buckets.restore(bucketId);
+    return buckets
+        .findById(bucketId)
+        .map(BucketResponse::from)
+        .orElseThrow(() -> new BucketNotFoundException(bucketId));
   }
 }

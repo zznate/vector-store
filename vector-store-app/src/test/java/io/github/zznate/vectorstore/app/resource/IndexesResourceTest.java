@@ -153,6 +153,129 @@ class IndexesResourceTest extends AbstractResourceTest {
   }
 
   @Test
+  void restoreOfSoftDeletedIndexReturns200AndMakesItVisible() {
+    given()
+        .header(ApiKeyAuthenticationFilter.HEADER, ADMIN_TOKEN)
+        .contentType(ContentType.JSON)
+        .body(
+            """
+            {"indexId":"products","displayName":"Products","dimension":4,"metric":"COSINE","engineParams":{}}
+            """)
+        .when()
+        .post("/v1/buckets/demo/indexes")
+        .then()
+        .statusCode(201);
+
+    given()
+        .header(ApiKeyAuthenticationFilter.HEADER, ADMIN_TOKEN)
+        .when()
+        .delete("/v1/buckets/demo/indexes/products")
+        .then()
+        .statusCode(204);
+
+    given()
+        .header(ApiKeyAuthenticationFilter.HEADER, ADMIN_TOKEN)
+        .when()
+        .post("/v1/buckets/demo/indexes/products:restore")
+        .then()
+        .statusCode(200)
+        .body("indexId", is("products"));
+
+    given()
+        .header(ApiKeyAuthenticationFilter.HEADER, ADMIN_TOKEN)
+        .when()
+        .get("/v1/buckets/demo/indexes/products")
+        .then()
+        .statusCode(200)
+        .body("indexId", is("products"));
+  }
+
+  @Test
+  void restoreOfActiveIndexIsConflict() {
+    given()
+        .header(ApiKeyAuthenticationFilter.HEADER, ADMIN_TOKEN)
+        .contentType(ContentType.JSON)
+        .body(
+            """
+            {"indexId":"products","displayName":"Products","dimension":4,"metric":"COSINE","engineParams":{}}
+            """)
+        .when()
+        .post("/v1/buckets/demo/indexes")
+        .then()
+        .statusCode(201);
+
+    given()
+        .header(ApiKeyAuthenticationFilter.HEADER, ADMIN_TOKEN)
+        .when()
+        .post("/v1/buckets/demo/indexes/products:restore")
+        .then()
+        .statusCode(409)
+        .body("error", is("index_already_active"));
+  }
+
+  @Test
+  void restoreOfMissingIndexIsNotFound() {
+    given()
+        .header(ApiKeyAuthenticationFilter.HEADER, ADMIN_TOKEN)
+        .when()
+        .post("/v1/buckets/demo/indexes/nosuch:restore")
+        .then()
+        .statusCode(404)
+        .body("error", is("index_not_found"));
+  }
+
+  @Test
+  void restoreOfIndexCascadesUpwardToSoftDeletedBucket() {
+    given()
+        .header(ApiKeyAuthenticationFilter.HEADER, ADMIN_TOKEN)
+        .contentType(ContentType.JSON)
+        .body(
+            """
+            {"indexId":"products","displayName":"Products","dimension":4,"metric":"COSINE","engineParams":{}}
+            """)
+        .when()
+        .post("/v1/buckets/demo/indexes")
+        .then()
+        .statusCode(201);
+
+    // Soft-delete the index, then soft-delete the (now empty) bucket.
+    given()
+        .header(ApiKeyAuthenticationFilter.HEADER, ADMIN_TOKEN)
+        .when()
+        .delete("/v1/buckets/demo/indexes/products")
+        .then()
+        .statusCode(204);
+    given()
+        .header(ApiKeyAuthenticationFilter.HEADER, ADMIN_TOKEN)
+        .when()
+        .delete("/v1/buckets/demo")
+        .then()
+        .statusCode(204);
+
+    // Restoring the index must also restore the parent bucket so the
+    // index is reachable again.
+    given()
+        .header(ApiKeyAuthenticationFilter.HEADER, ADMIN_TOKEN)
+        .when()
+        .post("/v1/buckets/demo/indexes/products:restore")
+        .then()
+        .statusCode(200);
+
+    given()
+        .header(ApiKeyAuthenticationFilter.HEADER, ADMIN_TOKEN)
+        .when()
+        .get("/v1/buckets/demo")
+        .then()
+        .statusCode(200);
+    given()
+        .header(ApiKeyAuthenticationFilter.HEADER, ADMIN_TOKEN)
+        .when()
+        .get("/v1/buckets/demo/indexes/products")
+        .then()
+        .statusCode(200);
+  }
+
+  @Test
   void recreatingAnIndexInRetentionIsConflict() {
     given()
         .header(ApiKeyAuthenticationFilter.HEADER, ADMIN_TOKEN)

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.zznate.vectorstore.api.dto.CreateIndexRequest;
 import io.github.zznate.vectorstore.api.dto.IndexResponse;
 import io.github.zznate.vectorstore.api.error.BucketNotFoundException;
+import io.github.zznate.vectorstore.api.error.IndexAlreadyActiveException;
 import io.github.zznate.vectorstore.api.error.IndexAlreadyExistsException;
 import io.github.zznate.vectorstore.api.error.IndexInRetentionException;
 import io.github.zznate.vectorstore.api.error.IndexNotFoundException;
@@ -163,6 +164,52 @@ public class IndexesResource {
     writeBuffer.invalidateIndex(qualifiedId);
     commitCoordinator.invalidateIndex(qualifiedId);
     return Response.noContent().build();
+  }
+
+  /**
+   * Restores a soft-deleted index by clearing its {@code deleted_at}.
+   * Cascades upward: if the parent bucket is also soft-deleted, its
+   * {@code deleted_at} is cleared too — otherwise the restored index
+   * would point at a tombstoned bucket and {@code requireBucket} on
+   * subsequent operations would 404.
+   *
+   * <p>Bucket restore alone never cascades downward; index restore
+   * always cascades upward. This asymmetry mirrors the soft-delete
+   * cascade rules on the way down (each child is hidden independently)
+   * and on the way up (you cannot have a live child of a tombstoned
+   * parent).
+   *
+   * <p>404 if the index id never existed or has been hard-deleted past
+   * retention. 409 if the index is already active.
+   */
+  @POST
+  @Path("/{index}:restore")
+  @Consumes(MediaType.WILDCARD)
+  @Operation(summary = "Restore a soft-deleted index (cascades upward to bucket)")
+  public IndexResponse restore(
+      @PathParam("bucket") String bucketId, @PathParam("index") String indexId) {
+    String qualifiedId = qualify(bucketId, indexId);
+    VectorIndex existing =
+        indexes
+            .findIncludingDeleted(qualifiedId)
+            .orElseThrow(() -> new IndexNotFoundException(qualifiedId));
+    if (!existing.isDeleted()) {
+      throw new IndexAlreadyActiveException(qualifiedId);
+    }
+    // Cascade upward if the parent bucket is also soft-deleted.
+    buckets
+        .findIncludingDeleted(bucketId)
+        .ifPresent(
+            parent -> {
+              if (parent.isDeleted()) {
+                buckets.restore(bucketId);
+              }
+            });
+    indexes.restore(qualifiedId);
+    return indexes
+        .findById(qualifiedId)
+        .map(this::toResponse)
+        .orElseThrow(() -> new IndexNotFoundException(qualifiedId));
   }
 
   private void requireBucket(String bucketId) {

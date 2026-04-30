@@ -154,6 +154,52 @@ class BucketsResourceTest extends AbstractResourceTest {
   }
 
   @Test
+  void restoreOfSoftDeletedBucketReturns200AndMakesItVisible() {
+    buckets.create(Bucket.active(DEMO_BUCKET, "Demo", clock.instant()));
+    buckets.softDelete(DEMO_BUCKET, clock.instant());
+
+    given()
+        .header(ApiKeyAuthenticationFilter.HEADER, ADMIN_TOKEN)
+        .when()
+        .post("/v1/buckets/demo:restore")
+        .then()
+        .statusCode(200)
+        .body("bucketId", is("demo"));
+
+    given()
+        .header(ApiKeyAuthenticationFilter.HEADER, ADMIN_TOKEN)
+        .when()
+        .get("/v1/buckets/demo")
+        .then()
+        .statusCode(200)
+        .body("bucketId", is("demo"));
+  }
+
+  @Test
+  void restoreOfActiveBucketIsConflict() {
+    buckets.create(Bucket.active(DEMO_BUCKET, "Demo", clock.instant()));
+
+    given()
+        .header(ApiKeyAuthenticationFilter.HEADER, ADMIN_TOKEN)
+        .when()
+        .post("/v1/buckets/demo:restore")
+        .then()
+        .statusCode(409)
+        .body("error", is("bucket_already_active"));
+  }
+
+  @Test
+  void restoreOfMissingBucketIsNotFound() {
+    given()
+        .header(ApiKeyAuthenticationFilter.HEADER, ADMIN_TOKEN)
+        .when()
+        .post("/v1/buckets/nosuch:restore")
+        .then()
+        .statusCode(404)
+        .body("error", is("bucket_not_found"));
+  }
+
+  @Test
   void recreatingABucketInRetentionIsConflict() {
     buckets.create(Bucket.active(DEMO_BUCKET, "Demo", clock.instant()));
     buckets.softDelete(DEMO_BUCKET, clock.instant());

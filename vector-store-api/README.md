@@ -49,7 +49,8 @@ Organised under `io.github.zznate.vectorstore.api`:
   | 403 | `forbidden` | Bucket-scoped key against a different bucket, or non-admin key against an `@AdminOnly` route. |
   | 404 | `bucket_not_found` / `index_not_found` | Resource absent or in retention (deliberately indistinguishable from "never existed" so retention windows do not leak). |
   | 409 | `bucket_already_exists` / `index_already_exists` | Active row with the same id. |
-  | 409 | `bucket_in_retention` / `index_in_retention` | Soft-deleted row with the same id is still inside retention. The error message includes `deleted_at`; client must wait for retention to expire or restore the row (see [restore endpoints](#restore-endpoints) once task #13 lands). |
+  | 409 | `bucket_in_retention` / `index_in_retention` | Soft-deleted row with the same id is still inside retention. The error message includes `deleted_at`; client must wait for retention to expire or [restore](#lifecycle-and-soft-delete) the row. |
+  | 409 | `bucket_already_active` / `index_already_active` | Restore was invoked but the row is already active. |
   | 409 | `bucket_not_empty` | Cannot soft-delete a bucket with active child indexes. |
 
 - [`auth/`](src/main/java/io/github/zznate/vectorstore/api/auth) —
@@ -116,6 +117,35 @@ for the full invalidation list.
 The retention sweep is **disabled by default** (`vectorstore.retention.enabled=false`).
 Operators must opt in explicitly. See [`vector-store-app`](../vector-store-app/README.md#retention-sweep)
 for the full config reference.
+
+#### Restore
+
+`POST /v1/buckets/{bucket}:restore` and
+`POST /v1/buckets/{bucket}/indexes/{index}:restore` clear `deleted_at`
+on a soft-deleted row, making it visible again. Both are admin-only
+and bodyless.
+
+- **Bucket restore does not cascade downward.** Each soft-deleted
+  child index must be restored explicitly. A restored bucket with
+  soft-deleted children is fine — the bucket is addressable again,
+  and the children remain hidden until their own restore runs.
+- **Index restore cascades upward.** If the parent bucket is also
+  soft-deleted, its `deleted_at` is cleared in the same request —
+  otherwise the restored index would point at a tombstoned bucket
+  and `requireBucket` would 404 on subsequent operations.
+
+Status codes:
+
+| HTTP | Meaning |
+|---|---|
+| 200 | Restored. Response body is the canonical `BucketResponse` / `IndexResponse`. |
+| 404 | Resource never existed *or* was hard-deleted past retention (deliberately conflated). |
+| 409 | Resource is already active (`bucket_already_active` / `index_already_active`). |
+
+Restore inside the retention window is unconditional — it does not
+extend retention or restart any timer; it simply moves the row back
+into the active set. Once the sweep hard-deletes a row it cannot be
+restored; the only path back is to re-create with the same id.
 
 ### Authentication
 
