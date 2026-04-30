@@ -49,6 +49,27 @@ Organised under `io.github.zznate.vectorstore.api`:
   `VectorStoreSecurityContext`, the `@AdminOnly` annotation, and the
   `ApiKeyAuthenticationFilter` (`@Provider`, `AUTHENTICATION` priority).
 
+### Query knobs
+
+`POST /v1/indexes/{bucket}/{index}/vectors:query` accepts the following
+[`QueryRequest`](src/main/java/io/github/zznate/vectorstore/api/dto/QueryRequest.java)
+fields:
+
+| Field | Required | Bounds | Default | Notes |
+|---|---|---|---|---|
+| `vector` | yes | length ≥ 1 | — | Float array. Dimension must equal `vector_index.dimension`. |
+| `topK` | yes | `[1, 1000]` | — | Number of hits to return. |
+| `filter` | no | — | none | See [`FilterParser`](../vector-store-metadata/README.md#filter-semantics) for the supported grammar (`Equals`, `In`, `And`, `Or`, `Not`). |
+| `rerankK` | no | `[1, 10000]` | `topK` | Width of JVector's reranking pool. Wider widens the search-time accuracy/cost trade-off; only meaningful once PQ is adopted (with the current `InlineVectors`-only feature set the candidate pool is already exact). |
+| `threshold` | no | `≥ 0.0` | `0.0` | Minimum approximate similarity for a candidate to enter the rerank pool. Cosine and dot-product yield scores in `[0, 1]` after JVector normalisation; `0.0` is "no cut". |
+| `rerankFloor` | no | `≥ 0.0` | `0.0` | Minimum exact similarity for a reranked hit to be returned. |
+
+Per-query knobs flow through to JVector via
+[`SearchTuning`](../vector-store-engine/src/main/java/io/github/zznate/vectorstore/engine/search/SearchTuning.java).
+Per-process build defaults (the parameters set at index creation
+time) live at `vectorstore.index.defaults.*` — see
+[`vector-store-core`](../vector-store-core/README.md#index-configuration-reference).
+
 ### Authentication
 
 - Token format: `keyId.secret`, carried in `X-Api-Key`.

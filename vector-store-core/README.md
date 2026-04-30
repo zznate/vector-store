@@ -141,6 +141,66 @@ vectorstore.cache.resident.bytes{index_id}
 vectorstore.cache.resident.segments{index_id}
 ```
 
+## Index configuration reference
+
+Index parameters are resolved at the resource layer with three layers
+of precedence (highest to lowest):
+
+1. **Per-index overrides** — the `engineParams` map on the
+   `POST /v1/buckets/{bucket}/indexes` request. Persisted to
+   `vector_index.engine_params` as the canonical merged JSON; all
+   later reads use this verbatim. Once an index has segments these
+   values **freeze for the lifetime of the index** — JVector PR #659's
+   `validateGraphConfiguration` requires every segment within one
+   compaction to share `m`, `addHierarchy`, and the feature set.
+2. **Per-process defaults** — `vectorstore.index.defaults.*` config
+   keys ([`IndexBuildParamsDefaults`](src/main/java/io/github/zznate/vectorstore/core/catalog/model/IndexBuildParamsDefaults.java)).
+   SmallRye Config layers env vars (`VECTORSTORE_INDEX_DEFAULTS_M=64`)
+   over `application.properties` over `@WithDefault`. Applied only at
+   index creation time; existing indexes are unaffected by changes.
+3. **Per-query knobs** — `rerankK` / `threshold` / `rerankFloor` on
+   the query DTO. See [`vector-store-api`](../vector-store-api/README.md#query-knobs)
+   for the wire shape.
+
+### `vectorstore.index.defaults.*` — per-process build defaults
+
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `m` | `int` | `32` | Graph degree. Higher → better recall, more memory per node. |
+| `beam-width` | `int` | `200` | Vamana ef_construction. Higher → better recall, slower build. |
+| `neighbor-overflow` | `float` | `1.2` | Multiplier on the neighbour pool during insertion. |
+| `alpha` | `float` | `1.2` | Vamana pruning threshold. |
+| `pq-subspaces` | `int` | `128` | PQ subspaces. Must divide the vector dimension. Unused while `InlineVectors` is the only writer feature. |
+| `pq-subspace-clusters` | `int` | `256` | Cluster count per PQ subspace. |
+| `add-hierarchy` | `bool` | `false` | `false` = flat Vamana / DiskANN graph; `true` = HNSW-style hierarchy. |
+| `cache-policy` | enum | `SMART` | Default warm-tier residency policy: `SMART` \| `RESIDENT` \| `MINIMAL`. Per-index override via `engineParams.cachePolicy`. |
+
+`cacheBytes` is an opt-in per-index hint (`engineParams.cacheBytes`)
+with no global default.
+
+See [`vector-store-engine`](../vector-store-engine/README.md#jvector-parameters)
+for tuning advice and the parameter sweep harness that evaluates
+corners of this state space against the recall fixture.
+
+### `vectorstore.index.startup-validation` — boot-time catalog check
+
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `vectorstore.index.startup-validation` | enum | `warn` | `off` \| `warn` \| `error`. Controls [`IndexParamsStartupHook`](../vector-store-app/src/main/java/io/github/zznate/vectorstore/app/startup/IndexParamsStartupHook.java)'s response to drift / corruption found by [`IndexParamsValidator`](src/main/java/io/github/zznate/vectorstore/core/catalog/model/IndexParamsValidator.java). |
+
+Modes:
+
+- `off` — skip the scan. Fastest boot.
+- `warn` — log INFO drift, log WARN parse failures, continue
+  (default).
+- `error` — log INFO drift, refuse startup with an
+  `IllegalStateException` if any index's persisted `engine_params`
+  fails to parse or violates the `IndexBuildParams` invariants.
+
+Drift is normal once globals move (existing indexes keep their
+persisted params); the INFO log is the operator's paper trail.
+Parse failures usually signal a corrupted catalog row.
+
 ## Dependencies
 
 - `org.jdbi:jdbi3-core`, `jdbi3-sqlobject`, `jdbi3-jackson2` — data access.

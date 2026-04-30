@@ -156,11 +156,18 @@ attempt.
 
 ## JVector parameters
 
-Defaults live in
-[`IndexBuildParams.defaults()`](../vector-store-core/src/main/java/io/github/zznate/vectorstore/core/catalog/model/IndexBuildParams.java)
-and are applied per-index at `POST /v1/buckets/{bucket}/indexes` time —
-the full canonical set is merged with the caller's overrides and
-persisted as JSON in `vector_index.engine_params`.
+Resolution order (highest → lowest precedence) is documented in the
+[`vector-store-core` index configuration reference](../vector-store-core/README.md#index-configuration-reference);
+the short version: per-index `engineParams` override per-process
+`vectorstore.index.defaults.*` config, which override the
+`@WithDefault` baseline in
+[`IndexBuildParamsDefaults`](../vector-store-core/src/main/java/io/github/zznate/vectorstore/core/catalog/model/IndexBuildParamsDefaults.java).
+Search-time per-query knobs (`rerankK`, `threshold`, `rerankFloor`)
+are independent and live on the [`QueryRequest`](../vector-store-api/README.md#query-knobs).
+At create-index time the merged set is canonicalised and persisted
+as JSON in `vector_index.engine_params`; once an index has segments
+those values **freeze for the lifetime of the index** under JVector
+PR #659's `validateGraphConfiguration`.
 
 | Parameter | Default | Effect |
 |---|---|---|
