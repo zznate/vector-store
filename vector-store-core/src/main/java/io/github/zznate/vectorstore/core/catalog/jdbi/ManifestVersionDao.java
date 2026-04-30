@@ -35,6 +35,7 @@ interface ManifestVersionDao {
         FROM manifest_version
        WHERE index_id = :indexId
        ORDER BY version
+       LIMIT 1024
       """)
   List<ManifestVersion> listByIndex(@Bind("indexId") String indexId);
 }

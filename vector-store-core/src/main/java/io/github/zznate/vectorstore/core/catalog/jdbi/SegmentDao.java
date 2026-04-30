@@ -37,6 +37,7 @@ interface SegmentDao {
         FROM segment
        WHERE index_id = :indexId
        ORDER BY created_at
+       LIMIT 4096
       """)
   List<Segment> listByIndex(@Bind("indexId") String indexId);
 

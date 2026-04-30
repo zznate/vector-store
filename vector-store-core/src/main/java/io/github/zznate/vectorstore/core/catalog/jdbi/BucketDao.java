@@ -32,6 +32,7 @@ interface BucketDao {
       SELECT bucket_id, display_name, created_at
         FROM vector_bucket
        ORDER BY created_at
+       LIMIT 5000
       """)
   List<Bucket> list();
 

@@ -33,6 +33,7 @@ interface ApiKeyDao {
       SELECT key_id, secret_hash, bucket_id, created_at, last_used_at
         FROM api_key
        ORDER BY created_at
+       LIMIT 5000
       """)
   List<ApiKey> list();
 

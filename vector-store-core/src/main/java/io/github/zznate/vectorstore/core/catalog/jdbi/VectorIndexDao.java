@@ -36,6 +36,7 @@ interface VectorIndexDao {
         FROM vector_index
        WHERE bucket_id = :bucketId
        ORDER BY created_at
+       LIMIT 5000
       """)
   List<VectorIndex> listByBucket(@Bind("bucketId") String bucketId);
 
@@ -44,6 +45,7 @@ interface VectorIndexDao {
       SELECT index_id, bucket_id, display_name, dimension, metric, engine_params, created_at
         FROM vector_index
        ORDER BY created_at
+       LIMIT 10000
       """)
   List<VectorIndex> listAll();
 
