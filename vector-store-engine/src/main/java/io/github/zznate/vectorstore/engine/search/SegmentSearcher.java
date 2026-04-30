@@ -79,7 +79,8 @@ public class SegmentSearcher implements Searcher {
   }
 
   @Override
-  public List<ScoredOrdinal> search(Segment segment, float[] queryVector, int topK, Bits accept) {
+  public List<ScoredOrdinal> search(
+      Segment segment, float[] queryVector, int topK, Bits accept, SearchTuning tuning) {
     SegmentHandle handle = handleFor(segment);
     VectorSimilarityFunction similarity = jvectorSimilarity(segment);
     VectorFloat<?> query = VTS.createFloatVector(queryVector);
@@ -96,7 +97,9 @@ public class SegmentSearcher implements Searcher {
     try (Scope ignored = span.makeCurrent()) {
       RandomAccessVectorValues ravv = (RandomAccessVectorValues) searcher.getView();
       SearchScoreProvider ssp = DefaultSearchScoreProvider.exact(query, similarity, ravv);
-      SearchResult result = searcher.search(ssp, topK, topK, 0.0f, 0.0f, accept);
+      SearchResult result =
+          searcher.search(
+              ssp, topK, tuning.rerankK(), tuning.threshold(), tuning.rerankFloor(), accept);
 
       DistributionSummary.builder("vectorstore.query.nodes_visited")
           .description("Graph nodes visited during a query")

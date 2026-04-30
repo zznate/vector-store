@@ -22,6 +22,7 @@ import io.github.zznate.vectorstore.engine.buffer.WriteBuffer;
 import io.github.zznate.vectorstore.engine.search.QueryCoordinator;
 import io.github.zznate.vectorstore.engine.search.ScoredHit;
 import io.github.zznate.vectorstore.engine.search.Searcher;
+import io.github.zznate.vectorstore.engine.search.SearchTuning;
 import io.github.zznate.vectorstore.engine.tombstone.CatalogStagedTombstones;
 import io.github.zznate.vectorstore.metadata.filter.AmbiguousFilterException;
 import io.github.zznate.vectorstore.metadata.filter.FilterExpr;
@@ -123,8 +124,13 @@ public class VectorsResource {
       throw new AmbiguousFilterHttpException(e.operator(), e.siblings());
     }
 
+    SearchTuning tuning =
+        SearchTuning.defaults(request.topK())
+            .withRerankK(request.rerankK())
+            .withThreshold(request.threshold())
+            .withRerankFloor(request.rerankFloor());
     List<ScoredHit> hits =
-        queryCoordinator.query(index.indexId(), request.vector(), request.topK(), filter);
+        queryCoordinator.query(index.indexId(), request.vector(), request.topK(), filter, tuning);
     List<QueryHit> mapped = new ArrayList<>(hits.size());
     for (ScoredHit hit : hits) {
       mapped.add(new QueryHit(hit.userId(), hit.score(), hit.attributes()));

@@ -8,6 +8,7 @@ import io.github.zznate.vectorstore.core.catalog.model.IndexBuildParams;
 import io.github.zznate.vectorstore.core.catalog.model.Segment;
 import io.github.zznate.vectorstore.engine.buffer.BufferEntry;
 import io.github.zznate.vectorstore.engine.search.ScoredOrdinal;
+import io.github.zznate.vectorstore.engine.search.SearchTuning;
 import io.github.zznate.vectorstore.engine.testsupport.EngineTestHarness;
 import io.github.zznate.vectorstore.testsupport.fixtures.FixtureChunk;
 import io.github.zznate.vectorstore.testsupport.fixtures.FixtureQuery;
@@ -87,7 +88,8 @@ class IndexBuildParamSweepTest {
       int top5Majority = 0;
       for (FixtureQuery query : queries) {
         List<ScoredOrdinal> hits =
-            harness.searcher.search(segment, query.embedding(), TOP_K, Bits.ALL);
+            harness.searcher.search(
+                segment, query.embedding(), TOP_K, Bits.ALL, SearchTuning.defaults(TOP_K));
         assertThat(hits).as("query %s returned no hits", query.id()).isNotEmpty();
         String topSlug = chunkToArticle.get(hits.get(0).userId());
         if (query.expectedArticleSlug().equals(topSlug)) {

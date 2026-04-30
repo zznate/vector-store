@@ -16,9 +16,13 @@ public interface Searcher {
   /**
    * Search {@code segment} for the top-{@code topK} hits of
    * {@code queryVector}, restricted to graph ordinals in {@code accept}.
-   * Returns in descending score order.
+   * {@code tuning} carries the JVector search-time knobs (rerank pool
+   * size, similarity thresholds); callers without a preference pass
+   * {@link SearchTuning#defaults(int)}. Returns in descending score
+   * order.
    */
-  List<ScoredOrdinal> search(Segment segment, float[] queryVector, int topK, Bits accept);
+  List<ScoredOrdinal> search(
+      Segment segment, float[] queryVector, int topK, Bits accept, SearchTuning tuning);
 
   /**
    * Ordinal of {@code userId} within {@code segment}, or {@code -1} if

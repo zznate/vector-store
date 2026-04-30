@@ -83,11 +83,17 @@ public class QueryCoordinator {
   /**
    * Run a kNN query against {@code indexId}, returning the top-{@code topK}
    * hits by score across every active segment. {@code filter} is optional
-   * (pass {@code null} for "no filter"). Returns an empty list if the
-   * index has no committed segments yet.
+   * (pass {@code null} for "no filter"); {@code tuning} carries the
+   * JVector per-query knobs (use {@link SearchTuning#defaults(int)} when
+   * the caller has no preference). Returns an empty list if the index has
+   * no committed segments yet.
    */
   public List<ScoredHit> query(
-      String indexId, float[] queryVector, int topK, FilterExpr filter) {
+      String indexId,
+      float[] queryVector,
+      int topK,
+      FilterExpr filter,
+      SearchTuning tuning) {
     Span span =
         tracer.spanBuilder("vectorstore.query.fanout").setAttribute("index_id", indexId).startSpan();
     long started = System.nanoTime();
@@ -98,7 +104,8 @@ public class QueryCoordinator {
       }
       cachePolicyEnforcer.onQuery(indexId, active);
       Set<String> stagedDenied = tombstones.tombstonedIds(indexId);
-      List<Pending> topResults = fanOutAndMerge(active, queryVector, topK, filter, stagedDenied, indexId);
+      List<Pending> topResults =
+          fanOutAndMerge(active, queryVector, topK, filter, tuning, stagedDenied, indexId);
       return enrichWithAttributes(topResults);
     } finally {
       Timer.builder("vectorstore.query.duration")
@@ -121,6 +128,7 @@ public class QueryCoordinator {
       float[] queryVector,
       int topK,
       FilterExpr filter,
+      SearchTuning tuning,
       Set<String> stagedDenied,
       String indexId) {
     PriorityQueue<Pending> topHeap =
@@ -132,7 +140,8 @@ public class QueryCoordinator {
         // entirely.
         continue;
       }
-      List<ScoredOrdinal> perSegment = searcher.search(segment, queryVector, topK, accept);
+      List<ScoredOrdinal> perSegment =
+          searcher.search(segment, queryVector, topK, accept, tuning);
       offerInto(topHeap, segment, perSegment, topK);
     }
     List<Pending> merged = new ArrayList<>(topHeap);

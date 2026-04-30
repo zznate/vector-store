@@ -52,13 +52,13 @@ class QueryCoordinatorMergeTest {
     when(resolver.activeSegments(INDEX_ID)).thenReturn(List.of(segA, segB));
 
     Searcher searcher = mock(Searcher.class);
-    when(searcher.search(eq(segA), eq(QUERY), anyInt(), any()))
+    when(searcher.search(eq(segA), eq(QUERY), anyInt(), any(), any()))
         .thenReturn(
             List.of(
                 new ScoredOrdinal(0, "a", 0.9f),
                 new ScoredOrdinal(1, "b", 0.5f),
                 new ScoredOrdinal(2, "c", 0.3f)));
-    when(searcher.search(eq(segB), eq(QUERY), anyInt(), any()))
+    when(searcher.search(eq(segB), eq(QUERY), anyInt(), any(), any()))
         .thenReturn(
             List.of(
                 new ScoredOrdinal(0, "d", 0.8f),
@@ -67,7 +67,8 @@ class QueryCoordinatorMergeTest {
 
     QueryCoordinator coordinator = newCoordinator(searcher, resolver);
 
-    List<ScoredHit> merged = coordinator.query(INDEX_ID, QUERY, 3, null);
+    List<ScoredHit> merged =
+        coordinator.query(INDEX_ID, QUERY, 3, null, SearchTuning.defaults(3));
 
     assertThat(merged).extracting(ScoredHit::userId).containsExactly("a", "d", "b");
     assertThat(merged).extracting(ScoredHit::score).containsExactly(0.9f, 0.8f, 0.5f);
@@ -79,7 +80,7 @@ class QueryCoordinatorMergeTest {
     when(resolver.activeSegments(INDEX_ID)).thenReturn(List.of(segA));
 
     Searcher searcher = mock(Searcher.class);
-    when(searcher.search(eq(segA), eq(QUERY), anyInt(), any()))
+    when(searcher.search(eq(segA), eq(QUERY), anyInt(), any(), any()))
         .thenReturn(
             List.of(
                 new ScoredOrdinal(0, "a", 0.9f),
@@ -88,7 +89,7 @@ class QueryCoordinatorMergeTest {
 
     QueryCoordinator coordinator = newCoordinator(searcher, resolver);
 
-    assertThat(coordinator.query(INDEX_ID, QUERY, 2, null))
+    assertThat(coordinator.query(INDEX_ID, QUERY, 2, null, SearchTuning.defaults(2)))
         .extracting(ScoredHit::userId)
         .containsExactly("a", "b");
   }
@@ -100,7 +101,7 @@ class QueryCoordinatorMergeTest {
 
     QueryCoordinator coordinator = newCoordinator(mock(Searcher.class), resolver);
 
-    assertThat(coordinator.query(INDEX_ID, QUERY, 5, null)).isEmpty();
+    assertThat(coordinator.query(INDEX_ID, QUERY, 5, null, SearchTuning.defaults(5))).isEmpty();
   }
 
   private QueryCoordinator newCoordinator(Searcher searcher, ManifestCache resolver) {
