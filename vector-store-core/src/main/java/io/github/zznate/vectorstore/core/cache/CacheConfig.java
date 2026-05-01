@@ -36,7 +36,7 @@ public interface CacheConfig {
   @WithName("segment-handle")
   SegmentHandleConfig segmentHandle();
 
-  /** Block cache (L1 heap + optional L2 off-heap arena). */
+  /** Block cache (L1 heap + optional L2 off-heap arena + optional L2 disk). */
   interface BlockConfig {
 
     /** L1 byte budget. Default 64 MiB. */
@@ -50,6 +50,9 @@ public interface CacheConfig {
 
     L2Config l2();
 
+    @WithName("l2-disk")
+    L2DiskConfig l2Disk();
+
     interface L2Config {
 
       /** Enable the off-heap arena tier behind L1. Disabled by default. */
@@ -58,6 +61,33 @@ public interface CacheConfig {
 
       /** L2 byte budget. Default 256 MiB. Ignored when {@link #enabled()} is false. */
       @WithDefault("268435456")
+      long bytes();
+    }
+
+    /**
+     * Persistent NVMe-backed tier that sits below the off-heap arena. Disabled by
+     * default. When both {@link L2Config#enabled()} and {@link #enabled()} are true,
+     * the read order is L1 heap → L2 off-heap → L2 disk → object store; on a disk
+     * hit, the value is promoted to every tier above so subsequent reads stay on
+     * the cheaper path. See {@code vectorstore.cache.block.l2-disk.*} in
+     * {@code application.properties} for operator-readable defaults.
+     */
+    interface L2DiskConfig {
+
+      /** Enable the on-disk tier behind L2 off-heap. Disabled by default. */
+      @WithDefault("false")
+      boolean enabled();
+
+      /** Directory holding {@code data.bin} + {@code index.bin}. Created at startup if missing. */
+      @WithDefault("./vector-store-cache")
+      java.nio.file.Path path();
+
+      /**
+       * Disk byte budget. Default 10 GiB. The data file is pre-allocated to this
+       * size at startup (sparse on most filesystems). Ignored when {@link
+       * #enabled()} is false.
+       */
+      @WithDefault("10737418240")
       long bytes();
     }
   }

@@ -69,14 +69,20 @@ re-list the keys.
 ### `vectorstore.cache.block.*` — object-store block cache
 
 Owned by [`vector-store-storage`](../vector-store-storage/README.md). L1
-heap (Caffeine, byte-weighted) plus an optional L2 off-heap arena tier.
+heap (Caffeine, byte-weighted) plus two optional L2 tiers — off-heap
+arena and persistent disk. When both are enabled, `BlockCacheProducer`
+composes them behind a `ChainedL2Provider` (off-heap before disk; hits
+promote upward).
 
 | Key | Type | Default | Range / notes |
 |---|---|---|---|
 | `bytes` | `long` | `67108864` (64 MiB) | L1 byte budget. Raise when the warm working set exceeds the budget and the L1 hit rate drops; headroom is cheap, missing a block costs a ranged `GetObject`. |
 | `block-size` | `int` | `65536` (64 KiB) | Fixed block size for caching and alignment. Tune to the graph stride: larger blocks amortise per-request overhead, smaller waste less when reads are fine-grained. |
 | `l2.enabled` | `bool` | `false` | Enable the off-heap arena tier behind L1. Required `--enable-preview` flag is already on every JVM entry point. |
-| `l2.bytes` | `long` | `268435456` (256 MiB) | L2 byte budget. Typically 4–8× the L1 budget so warm blocks survive longer. Ignored when `l2.enabled=false`. |
+| `l2.bytes` | `long` | `268435456` (256 MiB) | L2 off-heap byte budget. Typically 4–8× the L1 budget so warm blocks survive longer. Ignored when `l2.enabled=false`. |
+| `l2-disk.enabled` | `bool` | `false` | Enable the persistent disk tier behind L2 off-heap. NVMe-class deployments where the off-heap budget is too small. See [`vector-store-storage`](../vector-store-storage/README.md#l2-disk-tier--deployment-notes) for the deployment story. |
+| `l2-disk.path` | `Path` | `./vector-store-cache` | Directory holding `data.bin` + `index.bin`. Created at startup; rejected if not a writable directory when `l2-disk.enabled=true`. |
+| `l2-disk.bytes` | `long` | `10737418240` (10 GiB) | Disk byte budget. Pre-allocated at startup (sparse on most filesystems). Mapping uses JDK 21's `MemorySegment` so configurations >2 GiB are supported. |
 
 ### `vectorstore.cache.sidecar.*` — per-segment metadata sidecar cache
 

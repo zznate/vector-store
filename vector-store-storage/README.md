@@ -65,13 +65,19 @@ notes live here:
   graph file; pick a block size that amortises per-request overhead
   without over-fetching on fine-grained reads. The 64 KiB default fits
   JVector's on-disk format well.
-- **L2 is JDK-21 FFM-arena off-heap.** One arena per cached block;
-  native memory is freed synchronously on eviction with no GC
-  dependency. Enabling L2 requires `--enable-preview` on every JVM
-  entry point (already wired in the parent POM).
-- **L1↔L2 promotion on read.** A miss-on-L1 / hit-on-L2 promotes the
-  block back to L1, so a cold block becomes hot after one successful
-  off-heap read.
+- **L2 is two optional tiers, independent or chained.** An off-heap
+  arena tier (`vectorstore.cache.block.l2.*`) and a persistent
+  disk tier (`vectorstore.cache.block.l2-disk.*`). Both implement
+  `L2Provider`; when both are enabled `BlockCacheProducer` composes
+  them behind a `ChainedL2Provider` (off-heap before disk). Enabling
+  either requires `--enable-preview` on every JVM entry point (already
+  wired in the parent POM) — the off-heap tier uses the FFM Arena,
+  and the disk tier uses `FileChannel.map(MapMode, long, long, Arena)`
+  so its mapping unmaps deterministically on close.
+- **Promotion-on-read across the chain.** A hit in any lower tier
+  populates every tier above it before returning, so a cold block
+  becomes hot after one successful read regardless of which tier
+  served it. Writes are write-through to every tier.
 - **MINIMAL-policy indexes bypass L2.** Every per-segment reader for an
   index whose `IndexBuildParams.cachePolicy = MINIMAL` is constructed
   with `useL2=false`, so cold blocks for those indexes neither read
@@ -79,7 +85,37 @@ notes live here:
   use both tiers.
 - **Hit / miss ratios by tier** are on Prometheus via
   `vectorstore.cache.{hit,miss,eviction}{tier, cache_name=block}` —
-  watch `tier=l1_heap` and `tier=l2_offheap` to see promotion behaviour.
+  watch `tier=l1_heap`, `tier=l2_offheap`, and `tier=l2_disk` to see
+  promotion behaviour. The chain itself registers no metrics; each
+  underlying provider tags its own counters.
+
+### L2 disk tier — deployment notes
+
+Targets NVMe-class deployments where the off-heap arena is too small
+to hold the warm working set and object-store latency is still
+material. Disabled by default (`vectorstore.cache.block.l2-disk.enabled=false`).
+When enabled:
+
+- **Layout.** A single data file at `<l2-disk.path>/data.bin`,
+  pre-allocated to `l2-disk.bytes` (sparse on most filesystems), plus
+  an `index.bin` sidecar holding the keyed index. The path is created
+  if missing; `BlockCacheProducer` rejects `enabled=true` with a
+  non-writable path at startup with a message naming the path.
+- **Allocator.** Bump-pointer through the data file with wrap-around
+  + size-bucketed free-list reclaim on invalidate. See
+  [`LocalDiskL2Provider`](../vector-store-core/src/main/java/io/github/zznate/vectorstore/core/cache/LocalDiskL2Provider.java)
+  for full semantics.
+- **Persistence.** Clean shutdown serialises the index sidecar and
+  unmaps the data file deterministically via the owning Arena.
+  Reload on startup is best-effort — corrupt sidecar, missing
+  sidecar, or out-of-bounds entry references all fall back to a
+  cold start without losing the data file.
+- **Single-process.** A `FileLock` on the data file rejects a second
+  provider on the same directory with a clear `IOException`. Sharing
+  a disk-cache directory across processes is out of scope.
+- **Sizing.** The default budget is 10 GiB. The mapping is `long`-
+  indexed via JDK 21's FFM `MemorySegment`, so configurations well
+  past the legacy 2 GiB `MappedByteBuffer` cap are supported.
 
 ## CDI wiring
 
@@ -98,11 +134,12 @@ notes live here:
 ## Extension points for further multi-level caching
 
 `BlockCache` is the tiered façade in front of L1 (heap) and the optional
-L2 (off-heap arena). A future L3 disk tier (NVMe-backed) plugs in behind
-the same `L2Provider` interface from
-[`vector-store-core`](../vector-store-core/README.md), and `BlockCache`
-already promotes-on-read so any new tier inherits the promotion path
-without changing call sites. `BlockKey` intentionally encodes the full
+chained L2 stack (off-heap arena and / or NVMe-backed disk; see [L2 disk
+tier — deployment notes](#l2-disk-tier--deployment-notes)). New tiers
+plug in behind the same `L2Provider` interface from
+[`vector-store-core`](../vector-store-core/README.md); `ChainedL2Provider`
+handles ordering and promotion without `BlockCache` having to learn
+about multi-tier semantics. `BlockKey` intentionally encodes the full
 `<bucket>/<key>` so one process-wide cache can front multiple buckets
 without collision.
 
