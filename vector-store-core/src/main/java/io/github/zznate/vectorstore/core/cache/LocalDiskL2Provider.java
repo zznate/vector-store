@@ -6,8 +6,9 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.lang.foreign.Arena;
+import java.lang.foreign.MemorySegment;
 import java.nio.ByteBuffer;
-import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
@@ -31,7 +32,11 @@ import org.slf4j.LoggerFactory;
  * S3 round-trips are still too slow.
  *
  * <p>Layout: the data file is pre-allocated to {@link #maxBytes} bytes
- * and held mmap'd for the lifetime of the provider. Entries are written
+ * and held mapped via {@link FileChannel#map(FileChannel.MapMode, long,
+ * long, Arena)} for the lifetime of the provider. The mapping is owned
+ * by an {@link Arena} so {@link #close()} can unmap deterministically
+ * instead of relying on GC, and the JDK 21 FFM API supports {@code
+ * long}-indexed mappings — no 2 GiB cap. Entries are written
  * sequentially via the bump pointer, wrapping around to {@code 0} when
  * the next write would exceed the file size. On wrap, any existing
  * entry whose byte range overlaps the new write is evicted (eviction
@@ -68,7 +73,8 @@ public final class LocalDiskL2Provider implements L2Provider {
   private final Path indexFile;
   private final FileChannel fileChannel;
   private final FileLock fileLock;
-  private final MappedByteBuffer mmap;
+  private final Arena arena;
+  private final MemorySegment segment;
   private final long maxBytes;
   private final String cacheName;
 
@@ -110,7 +116,11 @@ public final class LocalDiskL2Provider implements L2Provider {
               StandardOpenOption.WRITE);
       this.fileLock = acquireExclusiveLock(fileChannel, dataFile);
       ensureFileSize(fileChannel, maxBytes);
-      this.mmap = fileChannel.map(FileChannel.MapMode.READ_WRITE, 0L, maxBytes);
+      // Arena owns the mapping; close() unmaps deterministically.
+      // ofShared() so reads / writes from any thread are legal under
+      // the existing single-lock serialisation.
+      this.arena = Arena.ofShared();
+      this.segment = fileChannel.map(FileChannel.MapMode.READ_WRITE, 0L, maxBytes, arena);
     } catch (IOException e) {
       throw new UncheckedIOException("failed to open L2 disk cache at " + directory, e);
     }
@@ -225,7 +235,15 @@ public final class LocalDiskL2Provider implements L2Provider {
       if (closed) {
         return;
       }
+      // Force dirty pages to disk BEFORE persisting the index sidecar
+      // so the index can never reference bytes that survived only in
+      // the page cache; if we crash post-index-persist before the OS
+      // flushes, warm restart would otherwise read garbage.
+      segment.force();
       LocalDiskCacheIndex.persist(indexFile, entries, allocOffset, currentBytes, cacheName);
+      // Closing the Arena unmaps the segment deterministically — no
+      // reliance on GC for native-resource cleanup.
+      arena.close();
       releaseLock();
       closeChannel();
       closed = true;
@@ -330,13 +348,12 @@ public final class LocalDiskL2Provider implements L2Provider {
 
   private byte[] readPayload(DiskEntry entry) {
     byte[] buf = new byte[entry.length()];
-    // ByteBuffer's absolute bulk get arrived in JDK 13; matches JDK 21 baseline.
-    mmap.get((int) entry.offset(), buf, 0, entry.length());
+    MemorySegment.copy(segment, entry.offset(), MemorySegment.ofArray(buf), 0L, entry.length());
     return buf;
   }
 
   private void writePayload(long offset, byte[] bytes) {
-    mmap.put((int) offset, bytes, 0, bytes.length);
+    MemorySegment.copy(MemorySegment.ofArray(bytes), 0L, segment, offset, bytes.length);
   }
 
   // ---- Misc helpers ---------------------------------------------------

@@ -247,4 +247,29 @@ class LocalDiskL2ProviderTest {
       assertThat(provider.tierName()).isEqualTo(LocalDiskL2Provider.TIER_L2_DISK);
     }
   }
+
+  /**
+   * Regression for the {@code MappedByteBuffer} {@code int}-indexing
+   * limit: the JDK 21 {@code FileChannel.map(MapMode, long, long, Arena)}
+   * overload returns a long-indexed {@link
+   * java.lang.foreign.MemorySegment}, so we can configure {@code maxBytes}
+   * past 2 GiB without {@code IllegalArgumentException} at construction.
+   * The underlying file is sparse on macOS / Linux / Windows-NTFS, so
+   * this test does not actually allocate 3 GiB on disk.
+   */
+  @Test
+  void supportsMaxBytesAbove2GiB(@TempDir Path tempDir) {
+    long threeGiB = 3L * 1024 * 1024 * 1024;
+    try (LocalDiskL2Provider provider =
+        new LocalDiskL2Provider(tempDir, threeGiB, null, "test")) {
+      // Write enough to push the bump pointer past the int-max boundary.
+      byte[] payload = new byte[1024];
+      for (int i = 0; i < payload.length; i++) {
+        payload[i] = (byte) (i & 0xff);
+      }
+      provider.put("k1", payload);
+      assertThat(provider.get("k1").orElseThrow()).containsExactly(payload);
+      assertThat(provider.stats().maxBytes()).isEqualTo(threeGiB);
+    }
+  }
 }
