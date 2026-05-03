@@ -3,6 +3,8 @@ package io.github.zznate.vectorstore.core.cache;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.RemovalCause;
+import com.github.benmanes.caffeine.cache.Scheduler;
+import com.github.benmanes.caffeine.cache.stats.CacheStats;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -10,7 +12,6 @@ import io.micrometer.core.instrument.Tag;
 import io.micrometer.core.instrument.Tags;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.LongAdder;
 import java.util.function.BiConsumer;
 import java.util.function.Predicate;
 import java.util.function.ToIntFunction;
@@ -44,9 +45,6 @@ public final class HeapCacheTier<K, V> implements CacheTier<K, V> {
   private final Counter hitCounter;
   private final Counter missCounter;
   private final Counter evictionCounter;
-  private final LongAdder hits = new LongAdder();
-  private final LongAdder misses = new LongAdder();
-  private final LongAdder evictions = new LongAdder();
   private final AtomicLong currentBytes = new AtomicLong();
   private final long maxBytes;
 
@@ -88,7 +86,8 @@ public final class HeapCacheTier<K, V> implements CacheTier<K, V> {
   }
 
   private Cache<K, V> buildCaffeine(Builder<K, V> b) {
-    Caffeine<Object, Object> c = Caffeine.newBuilder();
+    Caffeine<Object, Object> c =
+        Caffeine.newBuilder().recordStats().scheduler(Scheduler.systemScheduler());
     if (b.weigher != null && b.maxBytes > 0) {
       ToIntFunction<V> w = b.weigher;
       c.maximumWeight(b.maxBytes).weigher((K key, V value) -> w.applyAsInt(value));
@@ -97,22 +96,33 @@ public final class HeapCacheTier<K, V> implements CacheTier<K, V> {
     }
     Counter localEviction = this.evictionCounter;
     BiConsumer<K, V> userRemovalHook = b.removalHook;
+    c.evictionListener((K key, V value, RemovalCause cause) -> onEviction(cause, localEviction));
     c.removalListener(
-        (K key, V value, RemovalCause cause) ->
-            onCaffeineRemoval(key, value, cause, localEviction, userRemovalHook));
+        (K key, V value, RemovalCause cause) -> onRemoval(key, value, userRemovalHook));
     return c.build();
   }
 
-  private void onCaffeineRemoval(
-      K key, V value, RemovalCause cause, Counter localEviction, BiConsumer<K, V> userHook) {
+  /**
+   * Synchronous: fires inside the eviction with the cache lock held, giving
+   * happens-before for any caller that wants to observe the eviction-completed
+   * state (e.g. an L1→L2 promotion observer). Only fires when
+   * {@link RemovalCause#wasEvicted()} is true.
+   */
+  private void onEviction(RemovalCause cause, Counter localEviction) {
+    if (cause.wasEvicted() && localEviction != null) {
+      localEviction.increment();
+    }
+  }
+
+  /**
+   * Asynchronous: fires for every removal cause (including {@code EXPLICIT}),
+   * dispatched on Caffeine's executor. Carries the byte-accounting decrement
+   * — keeping it here ensures explicit {@code invalidate} / {@code removeIf}
+   * paths still tick the gauge — and runs the user cleanup hook.
+   */
+  private void onRemoval(K key, V value, BiConsumer<K, V> userHook) {
     if (value != null && weigher != null) {
       currentBytes.addAndGet(-weigher.applyAsInt(value));
-    }
-    if (cause.wasEvicted()) {
-      evictions.increment();
-      if (localEviction != null) {
-        localEviction.increment();
-      }
     }
     if (userHook != null && value != null) {
       runUserRemovalHook(key, value, userHook);
@@ -152,13 +162,11 @@ public final class HeapCacheTier<K, V> implements CacheTier<K, V> {
   public Optional<V> get(K key) {
     V value = cache.getIfPresent(key);
     if (value == null) {
-      misses.increment();
       if (missCounter != null) {
         missCounter.increment();
       }
       return Optional.empty();
     }
-    hits.increment();
     if (hitCounter != null) {
       hitCounter.increment();
     }
@@ -194,10 +202,11 @@ public final class HeapCacheTier<K, V> implements CacheTier<K, V> {
 
   @Override
   public CacheTierStats stats() {
+    CacheStats s = cache.stats();
     return new CacheTierStats(
-        hits.sum(),
-        misses.sum(),
-        evictions.sum(),
+        s.hitCount(),
+        s.missCount(),
+        s.evictionCount(),
         weigher == null ? -1L : currentBytes.get(),
         maxBytes,
         cache.estimatedSize());
