@@ -3,6 +3,7 @@ package io.github.zznate.vectorstore.core.cache;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Predicate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -74,6 +75,20 @@ public final class ChainedL2Provider implements L2Provider {
   public void invalidate(String key) {
     for (L2Provider provider : providers) {
       provider.invalidate(key);
+    }
+  }
+
+  @Override
+  public void invalidateMatching(Predicate<String> keyPredicate) {
+    for (L2Provider provider : providers) {
+      try {
+        provider.invalidateMatching(keyPredicate);
+      } catch (RuntimeException e) {
+        if (LOG.isWarnEnabled()) {
+          LOG.warn(
+              "failed to invalidateMatching on chained L2 provider {}", provider.tierName(), e);
+        }
+      }
     }
   }
 

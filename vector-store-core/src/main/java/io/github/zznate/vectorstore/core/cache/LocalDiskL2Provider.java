@@ -22,6 +22,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Predicate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -189,6 +190,25 @@ public final class LocalDiskL2Provider implements L2Provider {
     lock.lock();
     try {
       removeExisting(key);
+    } finally {
+      lock.unlock();
+    }
+  }
+
+  @Override
+  public void invalidateMatching(Predicate<String> keyPredicate) {
+    lock.lock();
+    try {
+      Iterator<Map.Entry<String, DiskEntry>> it = entries.entrySet().iterator();
+      while (it.hasNext()) {
+        Map.Entry<String, DiskEntry> mapEntry = it.next();
+        if (keyPredicate.test(mapEntry.getKey())) {
+          it.remove();
+          DiskEntry diskEntry = mapEntry.getValue();
+          currentBytes -= diskEntry.length();
+          releaseToFreeList(diskEntry.offset(), diskEntry.length());
+        }
+      }
     } finally {
       lock.unlock();
     }

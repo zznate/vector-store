@@ -144,6 +144,26 @@ class OffHeapArenaL2ProviderTest {
   }
 
   @Test
+  void invalidateMatchingEvictsPredicateMatches() {
+    provider.put("a-1", new byte[100]);
+    provider.put("a-2", new byte[100]);
+    provider.put("b-1", new byte[200]);
+
+    provider.invalidateMatching(s -> s.startsWith("a-"));
+
+    assertThat(provider.get("a-1")).isEmpty();
+    assertThat(provider.get("a-2")).isEmpty();
+    assertThat(provider.get("b-1")).hasValueSatisfying(b -> assertThat(b).hasSize(200));
+    assertThat(provider.stats().currentBytes()).isEqualTo(200L);
+    assertThat(provider.stats().currentEntries()).isEqualTo(1L);
+    assertThat(
+            registry
+                .counter("vectorstore.cache.eviction", "tier", "l2_offheap", "cache_name", "test")
+                .count())
+        .isZero();
+  }
+
+  @Test
   void invalidateAllClearsEverything() {
     provider.put("a", new byte[10]);
     provider.put("b", new byte[20]);

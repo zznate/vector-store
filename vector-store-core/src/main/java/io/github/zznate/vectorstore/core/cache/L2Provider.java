@@ -1,6 +1,7 @@
 package io.github.zznate.vectorstore.core.cache;
 
 import java.util.Optional;
+import java.util.function.Predicate;
 
 /**
  * Byte-oriented cache tier suitable for off-heap, mmap'd disk, and future
@@ -27,6 +28,16 @@ public interface L2Provider extends AutoCloseable {
   void put(String key, byte[] bytes);
 
   void invalidate(String key);
+
+  /**
+   * Evict every entry whose key matches {@code keyPredicate}. Implementations
+   * must serialise this with concurrent reads / writes via the same lock(s)
+   * protecting {@link #invalidate(String)}.
+   *
+   * <p>Does not increment the eviction counter — these are explicit removals,
+   * not capacity-driven evictions.
+   */
+  void invalidateMatching(Predicate<String> keyPredicate);
 
   void invalidateAll();
 

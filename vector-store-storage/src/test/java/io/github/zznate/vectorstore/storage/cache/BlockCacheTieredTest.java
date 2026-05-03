@@ -152,6 +152,54 @@ class BlockCacheTieredTest {
   }
 
   @Test
+  void invalidateForObjectKeyPrefixClearsBothTiers() {
+    BlockCache cache = new BlockCache(1L << 20, registry, l2);
+    BlockKey objectA0 = new BlockKey("bucket/objectA/", 0L);
+    BlockKey objectA1 = new BlockKey("bucket/objectA/", 1L);
+    BlockKey objectB0 = new BlockKey("bucket/objectB/", 0L);
+    cache.put(objectA0, new byte[] {1});
+    cache.put(objectA1, new byte[] {2});
+    cache.put(objectB0, new byte[] {3});
+
+    cache.invalidateForObjectKeyPrefix("bucket/objectA/");
+
+    assertThat(cache.tier().get(objectA0)).isEmpty();
+    assertThat(cache.tier().get(objectA1)).isEmpty();
+    assertThat(cache.tier().get(objectB0)).isPresent();
+    assertThat(l2.get(BlockCache.toL2Key(objectA0))).isEmpty();
+    assertThat(l2.get(BlockCache.toL2Key(objectA1))).isEmpty();
+    assertThat(l2.get(BlockCache.toL2Key(objectB0))).isPresent();
+  }
+
+  @Test
+  void invalidateForObjectKeyPrefixRespectsBoundary() {
+    BlockCache cache = new BlockCache(1L << 20, registry, l2);
+    BlockKey segXyz = new BlockKey("bucket/seg-xyz/", 0L);
+    BlockKey segXyz2 = new BlockKey("bucket/seg-xyz2/", 0L);
+    cache.put(segXyz, new byte[] {1});
+    cache.put(segXyz2, new byte[] {2});
+
+    cache.invalidateForObjectKeyPrefix("bucket/seg-xyz/");
+
+    assertThat(cache.tier().get(segXyz)).isEmpty();
+    assertThat(cache.tier().get(segXyz2)).isPresent();
+    assertThat(l2.get(BlockCache.toL2Key(segXyz))).isEmpty();
+    assertThat(l2.get(BlockCache.toL2Key(segXyz2))).isPresent();
+  }
+
+  @Test
+  void invalidateForObjectKeyPrefixWorksWithoutL2() {
+    SimpleMeterRegistry localRegistry = new SimpleMeterRegistry();
+    BlockCache cache = new BlockCache(1L << 20, localRegistry);
+    BlockKey objectA = new BlockKey("bucket/objectA/", 0L);
+    cache.put(objectA, new byte[] {1});
+
+    cache.invalidateForObjectKeyPrefix("bucket/objectA/");
+
+    assertThat(cache.tier().get(objectA)).isEmpty();
+  }
+
+  @Test
   void l1OnlyConstructorOmitsL2() {
     // Fresh registry so the @BeforeEach L2 instance hasn't already
     // registered its meters under the inspected name+tags.

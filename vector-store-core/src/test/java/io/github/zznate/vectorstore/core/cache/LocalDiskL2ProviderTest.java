@@ -101,6 +101,48 @@ class LocalDiskL2ProviderTest {
   }
 
   @Test
+  void invalidateMatchingEvictsPredicateMatches(@TempDir Path tempDir) {
+    SimpleMeterRegistry registry = new SimpleMeterRegistry();
+    try (LocalDiskL2Provider provider =
+        new LocalDiskL2Provider(tempDir, MAX_BYTES, registry, "test")) {
+      provider.put("a-1", new byte[100]);
+      provider.put("a-2", new byte[100]);
+      provider.put("b-1", new byte[200]);
+
+      provider.invalidateMatching(s -> s.startsWith("a-"));
+
+      assertThat(provider.get("a-1")).isEmpty();
+      assertThat(provider.get("a-2")).isEmpty();
+      assertThat(provider.get("b-1")).hasValueSatisfying(b -> assertThat(b).hasSize(200));
+      assertThat(provider.stats().currentBytes()).isEqualTo(200L);
+      assertThat(provider.stats().currentEntries()).isEqualTo(1L);
+      assertThat(
+              registry
+                  .counter("vectorstore.cache.eviction", "tier", "l2_disk", "cache_name", "test")
+                  .count())
+          .isZero();
+    }
+  }
+
+  @Test
+  void invalidateMatchingReleasesSlotsToFreeListForReuse(@TempDir Path tempDir) {
+    try (LocalDiskL2Provider provider =
+        new LocalDiskL2Provider(tempDir, MAX_BYTES, null, "test")) {
+      provider.put("a-1", new byte[100]);
+      provider.put("a-2", new byte[100]);
+
+      provider.invalidateMatching(s -> s.startsWith("a-"));
+
+      // Reused slots: a same-sized put should fit even after another byte
+      // budget is filled; relies on releaseToFreeList being called.
+      provider.put("c", new byte[100]);
+      provider.put("d", new byte[100]);
+      assertThat(provider.get("c")).isPresent();
+      assertThat(provider.get("d")).isPresent();
+    }
+  }
+
+  @Test
   void overSizedPutIsRejectedSilently(@TempDir Path tempDir) {
     try (LocalDiskL2Provider provider =
         new LocalDiskL2Provider(tempDir, 1024L, null, "test")) {

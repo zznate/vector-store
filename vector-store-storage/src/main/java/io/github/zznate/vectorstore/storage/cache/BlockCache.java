@@ -92,6 +92,27 @@ public final class BlockCache {
     }
   }
 
+  /**
+   * Evict every cached block whose object key starts with {@code prefix}.
+   * Sweeps both L1 ({@link HeapCacheTier#removeIf}) and, when configured, L2
+   * ({@link L2Provider#invalidateMatching}).
+   *
+   * <p>The caller is responsible for {@code /}-bounding {@code prefix} to
+   * avoid sibling-key collisions (e.g. {@code seg-xyz} would otherwise also
+   * match {@code seg-xyz2}). L2 keys are stored as
+   * {@code objectKey + "@" + blockIndex}; {@code prefix} must therefore not
+   * contain {@code @} (S3 object keys do not in practice).
+   *
+   * <p>Idempotent. Eviction counters are not incremented — these are explicit
+   * removals, not capacity-driven evictions.
+   */
+  public void invalidateForObjectKeyPrefix(String prefix) {
+    tier.removeIf(bk -> bk.objectKey().startsWith(prefix));
+    if (l2 != null) {
+      l2.invalidateMatching(s -> s.startsWith(prefix));
+    }
+  }
+
   /** Access the underlying L1 tier for stats reporting. */
   public HeapCacheTier<BlockKey, byte[]> tier() {
     return tier;

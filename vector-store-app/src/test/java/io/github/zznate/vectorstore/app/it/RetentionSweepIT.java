@@ -11,6 +11,8 @@ import io.github.zznate.vectorstore.core.catalog.repository.ManifestVersionRepos
 import io.github.zznate.vectorstore.core.catalog.repository.SegmentRepository;
 import io.github.zznate.vectorstore.core.catalog.repository.VectorIndexRepository;
 import io.github.zznate.vectorstore.core.retention.RetentionSweep;
+import io.github.zznate.vectorstore.storage.cache.BlockCache;
+import io.github.zznate.vectorstore.storage.cache.BlockKey;
 import io.github.zznate.vectorstore.storage.config.StorageConfig;
 import io.quarkus.test.common.QuarkusTestResource;
 import io.quarkus.test.junit.QuarkusTest;
@@ -56,6 +58,7 @@ class RetentionSweepIT extends AbstractResourceTest {
   @Inject Jdbi jdbi;
   @Inject S3Client s3Client;
   @Inject StorageConfig storageConfig;
+  @Inject BlockCache blockCache;
 
   @Test
   void hardDeletesIndexAndCascadesToObjectStoreAfterRetention() {
@@ -64,6 +67,15 @@ class RetentionSweepIT extends AbstractResourceTest {
 
     // Sanity: object-store data is there before sweep.
     assertObjectsUnderPrefix(segmentPrefix).isNotEmpty();
+
+    // Seed BlockCache with a synthetic entry whose objectKey lives under
+    // the segment's S3-cache-namespace prefix (bucket + "/" + segmentPrefix).
+    // hardDeleteIndex routes through SegmentStore.deletePrefix, which now
+    // invalidates BlockCache as a side effect.
+    BlockKey seededKey =
+        new BlockKey(storageConfig.bucket() + "/" + segmentPrefix + "/synthetic.bin", 0L);
+    blockCache.put(seededKey, new byte[] {1, 2, 3, 4});
+    assertThat(blockCache.tier().get(seededKey)).isPresent();
 
     // Soft-delete via REST (records deleted_at = now()).
     given()
@@ -89,6 +101,9 @@ class RetentionSweepIT extends AbstractResourceTest {
     assertObjectsUnderPrefix(segmentPrefix)
         .as("segment object-store prefix must be cleaned up")
         .isEmpty();
+    assertThat(blockCache.getIfPresent(seededKey))
+        .as("BlockCache entry under the hard-deleted segment's prefix must be invalidated")
+        .isNull();
   }
 
   @Test

@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Predicate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -166,6 +167,25 @@ public final class OffHeapArenaL2Provider implements L2Provider {
       if (entry != null) {
         currentBytes.addAndGet(-entry.length());
         entry.close();
+      }
+    } finally {
+      lock.unlock();
+    }
+  }
+
+  @Override
+  public void invalidateMatching(Predicate<String> keyPredicate) {
+    lock.lock();
+    try {
+      Iterator<Map.Entry<String, OffHeapEntry>> it = entries.entrySet().iterator();
+      while (it.hasNext()) {
+        Map.Entry<String, OffHeapEntry> mapEntry = it.next();
+        if (keyPredicate.test(mapEntry.getKey())) {
+          it.remove();
+          OffHeapEntry entry = mapEntry.getValue();
+          currentBytes.addAndGet(-entry.length());
+          entry.close();
+        }
       }
     } finally {
       lock.unlock();

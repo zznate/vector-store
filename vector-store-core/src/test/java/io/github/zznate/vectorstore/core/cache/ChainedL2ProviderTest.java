@@ -3,11 +3,13 @@ package io.github.zznate.vectorstore.core.cache;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Predicate;
 import org.junit.jupiter.api.Test;
 
 class ChainedL2ProviderTest {
@@ -83,6 +85,52 @@ class ChainedL2ProviderTest {
 
     assertThat(upper.lastValueOf("k")).isNull();
     assertThat(lower.lastValueOf("k")).isNull();
+  }
+
+  @Test
+  void invalidateMatchingCascadesToEveryTierWithSamePredicate() {
+    RecordingProvider upper = new RecordingProvider("upper");
+    RecordingProvider lower = new RecordingProvider("lower");
+    upper.put("a-1", new byte[]{1});
+    upper.put("b-1", new byte[]{2});
+    lower.put("a-2", new byte[]{3});
+    lower.put("b-2", new byte[]{4});
+    ChainedL2Provider chain = new ChainedL2Provider(List.of(upper, lower));
+
+    chain.invalidateMatching(s -> s.startsWith("a-"));
+
+    assertThat(upper.invalidateMatchingCalls.get()).isEqualTo(1);
+    assertThat(lower.invalidateMatchingCalls.get()).isEqualTo(1);
+    assertThat(upper.lastInvalidateMatchingPredicate)
+        .isSameAs(lower.lastInvalidateMatchingPredicate);
+    assertThat(upper.lastValueOf("a-1")).isNull();
+    assertThat(upper.lastValueOf("b-1")).isNotNull();
+    assertThat(lower.lastValueOf("a-2")).isNull();
+    assertThat(lower.lastValueOf("b-2")).isNotNull();
+  }
+
+  @Test
+  void invalidateMatchingContinuesAfterOneTierThrows() {
+    List<String> failureLog = new ArrayList<>();
+    RecordingProvider upper =
+        new RecordingProvider("upper") {
+          @Override
+          public void invalidateMatching(Predicate<String> keyPredicate) {
+            invalidateMatchingCalls.incrementAndGet();
+            failureLog.add("upper-threw");
+            throw new RuntimeException("boom");
+          }
+        };
+    RecordingProvider lower = new RecordingProvider("lower");
+    lower.put("k", new byte[]{1});
+    ChainedL2Provider chain = new ChainedL2Provider(List.of(upper, lower));
+
+    chain.invalidateMatching(s -> true); // must not throw
+
+    assertThat(upper.invalidateMatchingCalls.get()).isEqualTo(1);
+    assertThat(lower.invalidateMatchingCalls.get()).isEqualTo(1);
+    assertThat(lower.lastValueOf("k")).isNull();
+    assertThat(failureLog).containsExactly("upper-threw");
   }
 
   @Test
@@ -189,6 +237,8 @@ class ChainedL2ProviderTest {
     final AtomicInteger getCalls = new AtomicInteger();
     final AtomicInteger putCalls = new AtomicInteger();
     final AtomicInteger invalidateAllCalls = new AtomicInteger();
+    final AtomicInteger invalidateMatchingCalls = new AtomicInteger();
+    Predicate<String> lastInvalidateMatchingPredicate;
     final AtomicInteger closeCalls = new AtomicInteger();
     private final CacheTierStats stubStats;
 
@@ -216,6 +266,13 @@ class ChainedL2ProviderTest {
     @Override
     public void invalidate(String key) {
       store.remove(key);
+    }
+
+    @Override
+    public void invalidateMatching(Predicate<String> keyPredicate) {
+      invalidateMatchingCalls.incrementAndGet();
+      lastInvalidateMatchingPredicate = keyPredicate;
+      store.keySet().removeIf(keyPredicate);
     }
 
     @Override

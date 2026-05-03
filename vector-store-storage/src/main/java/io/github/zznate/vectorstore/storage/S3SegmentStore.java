@@ -166,13 +166,16 @@ public class S3SegmentStore implements SegmentStore, AutoCloseable {
   /**
    * List every object under {@code objectPrefix} and remove them in batches
    * of up to 1000 keys per {@code DeleteObjects} call (the S3 hard limit).
-   * Idempotent: missing prefix is a no-op. Cached graph suppliers under the
-   * prefix are dropped first so subsequent reads do not return stale data.
+   * Idempotent: missing prefix is a no-op. In-process caches under the prefix
+   * (graph suppliers, the shared {@link BlockCache}) are dropped first so
+   * subsequent reads do not return stale data and do not pin budget against
+   * already-deleted objects.
    */
   @Override
   public void deletePrefix(String objectPrefix) {
     String prefix = stripTrailingSlash(objectPrefix) + "/";
     graphSuppliers.entrySet().removeIf(entry -> entry.getKey().startsWith(prefix));
+    blockCache.invalidateForObjectKeyPrefix(bucket + "/" + prefix);
 
     String continuationToken = null;
     do {
