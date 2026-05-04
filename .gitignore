@@ -50,6 +50,9 @@ Thumbs.db
 /tmp-segments/
 /segments/
 
+# jqwik property-test failure database (per-module, regenerated on demand)
+**/.jqwik-database
+
 # ML models and caches (datagen module)
 .djl.ai/
 .huggingface/

@@ -66,6 +66,7 @@
     <roaringbitmap.version>1.3.0</roaringbitmap.version>
     <testcontainers.version>1.21.3</testcontainers.version>
     <mockito.version>5.14.2</mockito.version>
+    <jqwik.version>1.9.3</jqwik.version>
 
     <!-- Plugin versions -->
     <maven.compiler.plugin.version>3.13.0</maven.compiler.plugin.version>
@@ -218,6 +219,14 @@
         <scope>test</scope>
       </dependency>
 
+      <!-- jqwik for property-based tests in the L2 stress harness -->
+      <dependency>
+        <groupId>net.jqwik</groupId>
+        <artifactId>jqwik</artifactId>
+        <version>${jqwik.version}</version>
+        <scope>test</scope>
+      </dependency>
+
       <!-- Internal modules -->
       <dependency>
         <groupId>io.github.zznate</groupId>
@@ -300,6 +309,12 @@
               <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
               <maven.home>${maven.home}</maven.home>
             </systemPropertyVariables>
+            <!--
+              Heavy harness suites are tagged so they stay out of the
+              default unit run. The `stress-nightly` and `soak` profiles
+              flip these excludes when explicitly requested.
+            -->
+            <excludedGroups>stress-nightly,soak</excludedGroups>
           </configuration>
         </plugin>
 
