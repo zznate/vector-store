@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class HeapCacheTierTest {
@@ -191,5 +193,167 @@ class HeapCacheTierTest {
     assertThat(registry.find("vectorstore.cache.miss").tags(expectedTags).counter()).isNotNull();
     assertThat(registry.find("vectorstore.cache.eviction").tags(expectedTags).counter())
         .isNotNull();
+  }
+
+  @Test
+  void getOrLoadInvokesLoaderOnMissAndCachesResult() {
+    SimpleMeterRegistry registry = new SimpleMeterRegistry();
+    HeapCacheTier<String, byte[]> tier =
+        HeapCacheTier.<String, byte[]>builder("test")
+            .byteWeighted(1 << 20, v -> v.length)
+            .meterRegistry(registry)
+            .build();
+
+    AtomicInteger calls = new AtomicInteger();
+    byte[] value =
+        tier.getOrLoad(
+            "k",
+            k -> {
+              calls.incrementAndGet();
+              return new byte[] {7, 7};
+            });
+
+    assertThat(value).containsExactly(7, 7);
+    assertThat(calls.get()).isEqualTo(1);
+    assertThat(
+            registry.counter("vectorstore.cache.miss", "tier", "l1_heap", "cache_name", "test")
+                .count())
+        .isEqualTo(1.0);
+    // Subsequent get is a hit; loader doesn't run.
+    byte[] cached =
+        tier.getOrLoad(
+            "k",
+            k -> {
+              calls.incrementAndGet();
+              return new byte[] {99};
+            });
+    assertThat(cached).containsExactly(7, 7);
+    assertThat(calls.get()).isEqualTo(1);
+    assertThat(
+            registry.counter("vectorstore.cache.hit", "tier", "l1_heap", "cache_name", "test")
+                .count())
+        .isEqualTo(1.0);
+  }
+
+  @Test
+  void getOrLoadReturnsNullAndDoesNotCacheWhenLoaderReturnsNull() {
+    SimpleMeterRegistry registry = new SimpleMeterRegistry();
+    HeapCacheTier<String, byte[]> tier =
+        HeapCacheTier.<String, byte[]>builder("test")
+            .byteWeighted(1 << 20, v -> v.length)
+            .meterRegistry(registry)
+            .build();
+
+    AtomicInteger calls = new AtomicInteger();
+    byte[] result =
+        tier.getOrLoad(
+            "k",
+            k -> {
+              calls.incrementAndGet();
+              return null;
+            });
+
+    assertThat(result).isNull();
+    assertThat(tier.stats().currentEntries())
+        .as("null loader return must not insert into the cache")
+        .isZero();
+    // A second call should re-invoke the loader (no cached null).
+    tier.getOrLoad(
+        "k",
+        k -> {
+          calls.incrementAndGet();
+          return null;
+        });
+    assertThat(calls.get()).isEqualTo(2);
+  }
+
+  @Test
+  void getOrLoadCoalescesConcurrentMissesIntoOneLoaderInvocation() throws Exception {
+    SimpleMeterRegistry registry = new SimpleMeterRegistry();
+    HeapCacheTier<String, byte[]> tier =
+        HeapCacheTier.<String, byte[]>builder("test")
+            .byteWeighted(1 << 20, v -> v.length)
+            .meterRegistry(registry)
+            .build();
+
+    int threads = 8;
+    AtomicInteger loaderInvocations = new AtomicInteger();
+    CountDownLatch allArrived = new CountDownLatch(threads);
+    CountDownLatch loaderHolds = new CountDownLatch(1);
+    CountDownLatch loaderReleased = new CountDownLatch(1);
+
+    Runnable worker =
+        () -> {
+          try {
+            tier.getOrLoad(
+                "k",
+                k -> {
+                  loaderInvocations.incrementAndGet();
+                  // Pin the contention window: hold inside the loader until
+                  // every thread has entered getOrLoad and is racing.
+                  allArrived.countDown();
+                  try {
+                    loaderHolds.await();
+                  } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                  }
+                  return new byte[] {1};
+                });
+          } finally {
+            loaderReleased.countDown();
+          }
+        };
+
+    Thread[] workers = new Thread[threads];
+    for (int i = 0; i < threads; i++) {
+      workers[i] = new Thread(worker);
+      workers[i].start();
+    }
+    // Wait until the first thread is inside the loader and all others are
+    // queued behind Caffeine's per-key gate. Caffeine guarantees only one
+    // loader runs; the latch fires once when that one thread enters.
+    while (loaderInvocations.get() == 0) {
+      Thread.sleep(1);
+    }
+    // Give the rest of the threads time to call getOrLoad and block.
+    Thread.sleep(50);
+    loaderHolds.countDown();
+    for (Thread t : workers) {
+      t.join();
+    }
+
+    assertThat(loaderInvocations.get())
+        .as("Caffeine guarantees single-flight per key")
+        .isEqualTo(1);
+    assertThat(
+            registry.counter("vectorstore.cache.miss", "tier", "l1_heap", "cache_name", "test")
+                .count())
+        .as("exactly one miss — the loader-running caller")
+        .isEqualTo(1.0);
+    assertThat(
+            registry.counter("vectorstore.cache.hit", "tier", "l1_heap", "cache_name", "test")
+                .count())
+        .as("the other N-1 callers count as hits — they didn't run their lambda")
+        .isEqualTo((double) (threads - 1));
+  }
+
+  @Test
+  void closeUnregistersMeters() {
+    SimpleMeterRegistry registry = new SimpleMeterRegistry();
+    int meterCountBefore = registry.getMeters().size();
+
+    int cycles = 100;
+    for (int i = 0; i < cycles; i++) {
+      HeapCacheTier<String, byte[]> tier =
+          HeapCacheTier.<String, byte[]>builder("test-" + i)
+              .byteWeighted(1 << 20, v -> v.length)
+              .meterRegistry(registry)
+              .build();
+      tier.close();
+    }
+
+    assertThat(registry.getMeters())
+        .as("meters must return to baseline after close — distinct cache_name per cycle")
+        .hasSize(meterCountBefore);
   }
 }

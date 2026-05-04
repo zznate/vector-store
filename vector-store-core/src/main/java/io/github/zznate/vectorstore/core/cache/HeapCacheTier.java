@@ -7,12 +7,17 @@ import com.github.benmanes.caffeine.cache.Scheduler;
 import com.github.benmanes.caffeine.cache.stats.CacheStats;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tag;
 import io.micrometer.core.instrument.Tags;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.ToIntFunction;
 import org.slf4j.Logger;
@@ -47,11 +52,14 @@ public final class HeapCacheTier<K, V> implements CacheTier<K, V> {
   private final Counter evictionCounter;
   private final AtomicLong currentBytes = new AtomicLong();
   private final long maxBytes;
+  private final MeterRegistry meterRegistry;
+  private final List<Meter> registeredMeters = new ArrayList<>();
 
   private HeapCacheTier(Builder<K, V> b) {
     this.cacheName = b.cacheName;
     this.weigher = b.weigher;
     this.maxBytes = b.maxBytes;
+    this.meterRegistry = b.meterRegistry;
 
     Tags tags = Tags.of(Tag.of(TIER_TAG, TIER_L1_HEAP), Tag.of(CACHE_NAME_TAG, b.cacheName));
 
@@ -65,24 +73,29 @@ public final class HeapCacheTier<K, V> implements CacheTier<K, V> {
     registerGauges(b.meterRegistry, tags);
   }
 
-  private static Counter[] registerCounters(MeterRegistry meterRegistry, Tags tags) {
-    if (meterRegistry == null) {
+  private Counter[] registerCounters(MeterRegistry registry, Tags tags) {
+    if (registry == null) {
       return new Counter[3];
     }
-    return new Counter[] {
-      Counter.builder(METER_HIT)
-          .description("Cache hits tagged by tier and cache name")
-          .tags(tags)
-          .register(meterRegistry),
-      Counter.builder(METER_MISS)
-          .description("Cache misses tagged by tier and cache name")
-          .tags(tags)
-          .register(meterRegistry),
-      Counter.builder(METER_EVICTION)
-          .description("Cache evictions tagged by tier and cache name")
-          .tags(tags)
-          .register(meterRegistry),
-    };
+    Counter hit =
+        Counter.builder(METER_HIT)
+            .description("Cache hits tagged by tier and cache name")
+            .tags(tags)
+            .register(registry);
+    Counter miss =
+        Counter.builder(METER_MISS)
+            .description("Cache misses tagged by tier and cache name")
+            .tags(tags)
+            .register(registry);
+    Counter eviction =
+        Counter.builder(METER_EVICTION)
+            .description("Cache evictions tagged by tier and cache name")
+            .tags(tags)
+            .register(registry);
+    registeredMeters.add(hit);
+    registeredMeters.add(miss);
+    registeredMeters.add(eviction);
+    return new Counter[] {hit, miss, eviction};
   }
 
   private Cache<K, V> buildCaffeine(Builder<K, V> b) {
@@ -142,20 +155,24 @@ public final class HeapCacheTier<K, V> implements CacheTier<K, V> {
     }
   }
 
-  private void registerGauges(MeterRegistry meterRegistry, Tags tags) {
-    if (meterRegistry == null) {
+  private void registerGauges(MeterRegistry registry, Tags tags) {
+    if (registry == null) {
       return;
     }
-    Gauge.builder(METER_BYTES, currentBytes, AtomicLong::get)
-        .description("Current bytes held by the cache tier")
-        .tags(tags)
-        .strongReference(true)
-        .register(meterRegistry);
-    Gauge.builder(METER_ENTRIES, cache, Cache::estimatedSize)
-        .description("Current entry count held by the cache tier")
-        .tags(tags)
-        .strongReference(true)
-        .register(meterRegistry);
+    Gauge bytesGauge =
+        Gauge.builder(METER_BYTES, currentBytes, AtomicLong::get)
+            .description("Current bytes held by the cache tier")
+            .tags(tags)
+            .strongReference(true)
+            .register(registry);
+    Gauge entriesGauge =
+        Gauge.builder(METER_ENTRIES, cache, Cache::estimatedSize)
+            .description("Current entry count held by the cache tier")
+            .tags(tags)
+            .strongReference(true)
+            .register(registry);
+    registeredMeters.add(bytesGauge);
+    registeredMeters.add(entriesGauge);
   }
 
   @Override
@@ -171,6 +188,43 @@ public final class HeapCacheTier<K, V> implements CacheTier<K, V> {
       hitCounter.increment();
     }
     return Optional.of(value);
+  }
+
+  /**
+   * Look up {@code key}; on miss, invoke {@code mappingFunction} to compute
+   * a value and cache it atomically. Caffeine guarantees the function runs
+   * at most once per key under contention (single-flight), so concurrent
+   * misses for the same key collapse into one loader invocation while the
+   * other callers block then receive the same result.
+   *
+   * <p>A null return from the mapping function is propagated to the caller
+   * without caching — useful for "miss the lower tier" outcomes that
+   * shouldn't pollute L1.
+   *
+   * <p>Counter accounting: the {@code vectorstore.cache.hit} counter ticks
+   * for every caller whose lambda did <i>not</i> run (L1 hit, or coalesced
+   * with another caller's loader); {@code vectorstore.cache.miss} ticks
+   * for the caller whose lambda actually executed.
+   */
+  public V getOrLoad(K key, Function<K, V> mappingFunction) {
+    AtomicBoolean loaderCalled = new AtomicBoolean(false);
+    V value =
+        cache.get(
+            key,
+            k -> {
+              loaderCalled.set(true);
+              return mappingFunction.apply(k);
+            });
+    if (loaderCalled.get()) {
+      if (missCounter != null) {
+        missCounter.increment();
+      }
+    } else {
+      if (hitCounter != null) {
+        hitCounter.increment();
+      }
+    }
+    return value;
   }
 
   @Override
@@ -215,6 +269,29 @@ public final class HeapCacheTier<K, V> implements CacheTier<K, V> {
   @Override
   public String cacheName() {
     return cacheName;
+  }
+
+  /**
+   * Drop every cached entry and unregister every meter this tier
+   * registered with the {@link MeterRegistry}. Without the meter
+   * unregistration, the gauge's {@code strongReference(true)} setting
+   * would retain this tier instance via the gauge's
+   * {@code Supplier<Number>}, leaking the closed provider forever
+   * across restart cycles.
+   *
+   * <p>{@code HeapCacheTier} does not implement {@link AutoCloseable} —
+   * Caffeine has no native close — but {@code close()} gives the
+   * lifecycle owner a hook to release the meters when the tier itself
+   * is being disposed.
+   */
+  public void close() {
+    if (meterRegistry != null) {
+      for (Meter m : registeredMeters) {
+        meterRegistry.remove(m);
+      }
+      registeredMeters.clear();
+    }
+    cache.invalidateAll();
   }
 
   public static <K, V> Builder<K, V> builder(String cacheName) {

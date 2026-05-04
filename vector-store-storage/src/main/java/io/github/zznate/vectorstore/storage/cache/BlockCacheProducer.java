@@ -65,10 +65,14 @@ public class BlockCacheProducer {
    * heap both release here.
    */
   public void disposeBlockCache(@Disposes BlockCache cache) {
+    // L2 closes first, then L1. The two are independent resources (no
+    // BlockCache mutation calls during shutdown) so order is correctness-
+    // neutral; preserve the historical L2-first ordering for predictability.
     L2Provider l2 = cache.l2();
     if (l2 != null) {
       l2.close();
     }
+    cache.tier().close();
   }
 
   /**

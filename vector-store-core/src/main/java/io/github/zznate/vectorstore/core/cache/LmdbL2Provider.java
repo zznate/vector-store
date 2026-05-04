@@ -2,6 +2,7 @@ package io.github.zznate.vectorstore.core.cache;
 
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 import java.io.IOException;
@@ -91,6 +92,8 @@ public final class LmdbL2Provider implements L2Provider {
   private final Counter hitCounter;
   private final Counter missCounter;
   private final Counter evictionCounter;
+  private final MeterRegistry meterRegistry;
+  private final List<Meter> registeredMeters = new ArrayList<>();
 
   private volatile boolean closed;
 
@@ -107,6 +110,7 @@ public final class LmdbL2Provider implements L2Provider {
     this.maxBytes = maxBytes;
     this.perShardSoftCap = (long) ((double) (maxBytes / SHARDS) * SOFT_CAP_FRACTION);
     this.cacheName = cacheName;
+    this.meterRegistry = meterRegistry;
 
     try {
       Files.createDirectories(directory);
@@ -187,8 +191,15 @@ public final class LmdbL2Provider implements L2Provider {
   public void put(String key, byte[] bytes) {
     ensureOpen();
     if (bytes.length > maxBytes) {
-      logOversizedRejection(key, bytes.length);
-      return;
+      throw new IllegalArgumentException(
+          "L2 disk cache \""
+              + cacheName
+              + "\" rejecting oversized put: key="
+              + key
+              + " bytes="
+              + bytes.length
+              + " maxBytes="
+              + maxBytes);
     }
     Shard s = shards[shard(key)];
     s.lock.lock();
@@ -198,17 +209,6 @@ public final class LmdbL2Provider implements L2Provider {
       applyPutBookkeeping(s, plan, key, bytes.length);
     } finally {
       s.lock.unlock();
-    }
-  }
-
-  private void logOversizedRejection(String key, int length) {
-    if (LOG.isDebugEnabled()) {
-      LOG.debug(
-          "L2 disk cache \"{}\" rejecting oversized put: key={} bytes={} maxBytes={}",
-          cacheName,
-          key,
-          length,
-          maxBytes);
     }
   }
 
@@ -446,6 +446,15 @@ public final class LmdbL2Provider implements L2Provider {
         return;
       }
       closed = true;
+      // Unregister meters before releasing native resources: gauges hold
+      // a strongReference to this instance via the Supplier<Number>, so
+      // letting them outlive close() leaks the closed provider.
+      if (meterRegistry != null) {
+        for (Meter m : registeredMeters) {
+          meterRegistry.remove(m);
+        }
+        registeredMeters.clear();
+      }
       // env.close() returns immediately even with open read txns; the
       // orphans throw AlreadyClosedException on next op.
       env.close();
@@ -523,28 +532,34 @@ public final class LmdbL2Provider implements L2Provider {
     }
   }
 
-  private static Counter newCounter(
+  private Counter newCounter(
       MeterRegistry registry, String name, String description, Tags tags) {
     if (registry == null) {
       return null;
     }
-    return Counter.builder(name).description(description).tags(tags).register(registry);
+    Counter c = Counter.builder(name).description(description).tags(tags).register(registry);
+    registeredMeters.add(c);
+    return c;
   }
 
   private void registerGauges(MeterRegistry registry, Tags tags) {
     if (registry == null) {
       return;
     }
-    Gauge.builder(HeapCacheTier.METER_BYTES, this, p -> (double) p.statsBytes())
-        .description("Bytes currently held by the cache tier")
-        .tags(tags)
-        .strongReference(true)
-        .register(registry);
-    Gauge.builder(HeapCacheTier.METER_ENTRIES, this, p -> (double) p.statsEntries())
-        .description("Entry count currently held by the cache tier")
-        .tags(tags)
-        .strongReference(true)
-        .register(registry);
+    Gauge bytesGauge =
+        Gauge.builder(HeapCacheTier.METER_BYTES, this, p -> (double) p.statsBytes())
+            .description("Bytes currently held by the cache tier")
+            .tags(tags)
+            .strongReference(true)
+            .register(registry);
+    Gauge entriesGauge =
+        Gauge.builder(HeapCacheTier.METER_ENTRIES, this, p -> (double) p.statsEntries())
+            .description("Entry count currently held by the cache tier")
+            .tags(tags)
+            .strongReference(true)
+            .register(registry);
+    registeredMeters.add(bytesGauge);
+    registeredMeters.add(entriesGauge);
   }
 
   private long statsBytes() {

@@ -125,11 +125,13 @@ class LmdbL2ProviderTest {
   }
 
   @Test
-  void overSizedPutIsRejectedSilently(@TempDir Path tempDir) {
+  void overSizedPutThrowsIllegalArgumentException(@TempDir Path tempDir) {
     try (LmdbL2Provider provider = new LmdbL2Provider(tempDir, MAX_BYTES, null, "test")) {
       byte[] huge = new byte[(int) (MAX_BYTES + 1)];
 
-      provider.put("k", huge);
+      assertThatThrownBy(() -> provider.put("k", huge))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("oversized");
 
       assertThat(provider.get("k")).isEmpty();
       assertThat(provider.stats().currentEntries()).isZero();
@@ -238,6 +240,25 @@ class LmdbL2ProviderTest {
     assertThat(Files.exists(tempDir.resolve("data.bin"))).isTrue();
     assertThat(Files.exists(tempDir.resolve("index.bin"))).isTrue();
     assertThat(Files.readString(tempDir.resolve("data.bin"))).isEqualTo("legacy");
+  }
+
+  @Test
+  void closeUnregistersMeters(@TempDir Path tempDir) {
+    SimpleMeterRegistry registry = new SimpleMeterRegistry();
+    int meterCountBefore = registry.getMeters().size();
+
+    int cycles = 100;
+    for (int i = 0; i < cycles; i++) {
+      Path cycleDir = tempDir.resolve("cycle-" + i);
+      try (LmdbL2Provider provider =
+          new LmdbL2Provider(cycleDir, MAX_BYTES, registry, "test-" + i)) {
+        provider.put("k", new byte[] {1});
+      }
+    }
+
+    assertThat(registry.getMeters())
+        .as("meters must return to baseline after close — distinct cache_name per cycle")
+        .hasSize(meterCountBefore);
   }
 
   @Test

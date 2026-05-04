@@ -144,13 +144,16 @@ public final class ChainedL2Provider implements L2Provider {
   }
 
   /**
-   * After a hit from {@code providers[hitIndex]}, populate every tier
-   * strictly above it so the next read of {@code key} stays on the
-   * faster path.
+   * After a hit from {@code providers[hitIndex]}, promote the value by
+   * exactly one tier so the next read stays one step closer to the
+   * faster path. A frequently-accessed key climbs the chain over
+   * multiple reads; a key visited once reaches one level up and stops.
+   * This filters scan-shaped workloads naturally — promotion is gated
+   * by access frequency rather than happening unconditionally.
    */
   private void promoteUpward(int hitIndex, String key, byte[] bytes) {
-    for (int i = 0; i < hitIndex; i++) {
-      providers.get(i).put(key, bytes);
+    if (hitIndex > 0) {
+      providers.get(hitIndex - 1).put(key, bytes);
     }
   }
 }

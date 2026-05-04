@@ -2,6 +2,7 @@ package io.github.zznate.vectorstore.core.cache;
 
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 import java.lang.foreign.Arena;
@@ -83,6 +84,8 @@ public final class SlabOffHeapL2Provider implements L2Provider {
   private final Counter hitCounter;
   private final Counter missCounter;
   private final Counter evictionCounter;
+  private final MeterRegistry meterRegistry;
+  private final List<Meter> registeredMeters = new ArrayList<>();
 
   private volatile boolean closed;
 
@@ -133,6 +136,7 @@ public final class SlabOffHeapL2Provider implements L2Provider {
     }
 
     this.perShardSoftCap = (long) ((double) (maxBytes / SHARDS) * SOFT_CAP_FRACTION);
+    this.meterRegistry = meterRegistry;
 
     Tags tags =
         Tags.of(HeapCacheTier.TIER_TAG, TIER_L2_OFFHEAP, HeapCacheTier.CACHE_NAME_TAG, cacheName);
@@ -176,8 +180,15 @@ public final class SlabOffHeapL2Provider implements L2Provider {
   public void put(String key, byte[] bytes) {
     ensureOpen();
     if (bytes.length > blockSize) {
-      logOversizedRejection(key, bytes.length);
-      return;
+      throw new IllegalArgumentException(
+          "L2 off-heap cache \""
+              + cacheName
+              + "\" rejecting oversized put: key="
+              + key
+              + " bytes="
+              + bytes.length
+              + " blockSize="
+              + blockSize);
     }
     Shard s = shards[shard(key)];
     s.lock.lock();
@@ -191,17 +202,6 @@ public final class SlabOffHeapL2Provider implements L2Provider {
     }
   }
 
-  private void logOversizedRejection(String key, int length) {
-    if (LOG.isDebugEnabled()) {
-      LOG.debug(
-          "L2 off-heap cache \"{}\" rejecting oversized put: key={} bytes={} blockSize={}",
-          cacheName,
-          key,
-          length,
-          blockSize);
-    }
-  }
-
   /**
    * Read-only planning: determine which entries to evict so the post-put
    * state holds both byte-budget and slot-pool invariants. No mutation
@@ -209,11 +209,16 @@ public final class SlabOffHeapL2Provider implements L2Provider {
    */
   private PutPlan planPut(Shard s, String key, int putLen) {
     BlockEntry existing = s.entries.get(key);
-    Long existingLen = existing == null ? null : (long) existing.length();
-    Long existingSlot = existing == null ? null : existing.slot();
-    long baseline = s.currentBytes.get() - (existingLen == null ? 0L : existingLen);
-    long projected = baseline + putLen;
-    int available = s.freeSlots.size() + (existingSlot == null ? 0 : 1);
+    long existingLen = 0L;
+    long existingSlot = 0L;
+    int existingSlotsCredit = 0;
+    if (existing != null) {
+      existingLen = existing.length();
+      existingSlot = existing.slot();
+      existingSlotsCredit = 1;
+    }
+    long projected = s.currentBytes.get() - existingLen + putLen;
+    int available = s.freeSlots.size() + existingSlotsCredit;
     List<Map.Entry<String, BlockEntry>> toEvict = new ArrayList<>();
     Iterator<Map.Entry<String, BlockEntry>> it = s.entries.entrySet().iterator();
     while ((projected > perShardSoftCap || available == 0) && it.hasNext()) {
@@ -225,7 +230,7 @@ public final class SlabOffHeapL2Provider implements L2Provider {
       projected -= oldest.getValue().length();
       available += 1;
     }
-    return new PutPlan(existingLen, existingSlot, toEvict, projected);
+    return new PutPlan(existing, existingLen, existingSlot, toEvict, projected);
   }
 
   /**
@@ -282,7 +287,7 @@ public final class SlabOffHeapL2Provider implements L2Provider {
    * the prior entry and return its slot to the free pool.
    */
   private void applyNewEntry(Shard s, PutPlan plan, String key, int putLen) {
-    if (plan.existingSlot() != null) {
+    if (plan.existing() != null) {
       s.entries.remove(key);
       s.currentBytes.addAndGet(-plan.existingLen());
       s.freeSlots.addLast(plan.existingSlot());
@@ -413,6 +418,15 @@ public final class SlabOffHeapL2Provider implements L2Provider {
         return;
       }
       closed = true;
+      // Unregister meters before releasing native resources: gauges hold
+      // a strongReference to this instance via the Supplier<Number>, so
+      // letting them outlive close() leaks the closed provider.
+      if (meterRegistry != null) {
+        for (Meter m : registeredMeters) {
+          meterRegistry.remove(m);
+        }
+        registeredMeters.clear();
+      }
       arena.close();
       for (Shard s : shards) {
         s.entries.clear();
@@ -446,28 +460,34 @@ public final class SlabOffHeapL2Provider implements L2Provider {
     return (slot % slotsPerSegment) * blockSize;
   }
 
-  private static Counter newCounter(
+  private Counter newCounter(
       MeterRegistry registry, String name, String description, Tags tags) {
     if (registry == null) {
       return null;
     }
-    return Counter.builder(name).description(description).tags(tags).register(registry);
+    Counter c = Counter.builder(name).description(description).tags(tags).register(registry);
+    registeredMeters.add(c);
+    return c;
   }
 
   private void registerGauges(MeterRegistry registry, Tags tags) {
     if (registry == null) {
       return;
     }
-    Gauge.builder(HeapCacheTier.METER_BYTES, this, p -> (double) p.statsBytes())
-        .description("Bytes currently held by the cache tier")
-        .tags(tags)
-        .strongReference(true)
-        .register(registry);
-    Gauge.builder(HeapCacheTier.METER_ENTRIES, this, p -> (double) p.statsEntries())
-        .description("Entry count currently held by the cache tier")
-        .tags(tags)
-        .strongReference(true)
-        .register(registry);
+    Gauge bytesGauge =
+        Gauge.builder(HeapCacheTier.METER_BYTES, this, p -> (double) p.statsBytes())
+            .description("Bytes currently held by the cache tier")
+            .tags(tags)
+            .strongReference(true)
+            .register(registry);
+    Gauge entriesGauge =
+        Gauge.builder(HeapCacheTier.METER_ENTRIES, this, p -> (double) p.statsEntries())
+            .description("Entry count currently held by the cache tier")
+            .tags(tags)
+            .strongReference(true)
+            .register(registry);
+    registeredMeters.add(bytesGauge);
+    registeredMeters.add(entriesGauge);
   }
 
   private long statsBytes() {
@@ -516,28 +536,35 @@ public final class SlabOffHeapL2Provider implements L2Provider {
    * to a single {@code put} under the shard lock; no aliasing.
    */
   private static final class PutPlan {
-    private final Long existingLen;
-    private final Long existingSlot;
+    private final BlockEntry existing;
+    private final long existingLen;
+    private final long existingSlot;
     private final List<Map.Entry<String, BlockEntry>> toEvict;
     private final long projected;
     private long boundSlot;
 
     PutPlan(
-        Long existingLen,
-        Long existingSlot,
+        BlockEntry existing,
+        long existingLen,
+        long existingSlot,
         List<Map.Entry<String, BlockEntry>> toEvict,
         long projected) {
+      this.existing = existing;
       this.existingLen = existingLen;
       this.existingSlot = existingSlot;
       this.toEvict = toEvict;
       this.projected = projected;
     }
 
-    Long existingLen() {
+    BlockEntry existing() {
+      return existing;
+    }
+
+    long existingLen() {
       return existingLen;
     }
 
-    Long existingSlot() {
+    long existingSlot() {
       return existingSlot;
     }
 

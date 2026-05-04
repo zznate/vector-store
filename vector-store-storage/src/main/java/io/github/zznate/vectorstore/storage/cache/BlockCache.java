@@ -3,6 +3,8 @@ package io.github.zznate.vectorstore.storage.cache;
 import io.github.zznate.vectorstore.core.cache.HeapCacheTier;
 import io.github.zznate.vectorstore.core.cache.L2Provider;
 import io.micrometer.core.instrument.MeterRegistry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Process-wide tiered cache of fixed-size object blocks. L1 is an on-heap
@@ -20,6 +22,8 @@ import io.micrometer.core.instrument.MeterRegistry;
  * is preserved so call sites are untouched.
  */
 public final class BlockCache {
+
+  private static final Logger LOG = LoggerFactory.getLogger(BlockCache.class);
 
   public static final String CACHE_NAME = "block";
 
@@ -49,19 +53,29 @@ public final class BlockCache {
    * indexes, which neither read nor promote off-heap blocks.
    */
   public byte[] getIfPresent(BlockKey key, boolean useL2) {
-    byte[] hot = tier.get(key).orElse(null);
-    if (hot != null) {
-      return hot;
-    }
     if (!useL2 || l2 == null) {
+      return tier.get(key).orElse(null);
+    }
+    return tier.getOrLoad(key, this::loadFromL2OrNull);
+  }
+
+  /**
+   * L2 read for the {@code getOrLoad} loader. Returns {@code null} on miss
+   * <i>and</i> on any L2 runtime failure: a transient L2 fault must not
+   * propagate through the caller because Caffeine's single-flight machinery
+   * would amplify the throw to every concurrent caller blocked on the
+   * same key. Returning {@code null} causes Caffeine to skip caching and
+   * the next read retries against L2.
+   */
+  private byte[] loadFromL2OrNull(BlockKey key) {
+    try {
+      return l2.get(toL2Key(key)).orElse(null);
+    } catch (RuntimeException e) {
+      if (LOG.isWarnEnabled()) {
+        LOG.warn("L2 read failed for key {}: returning null and will refetch", key, e);
+      }
       return null;
     }
-    byte[] warm = l2.get(toL2Key(key)).orElse(null);
-    if (warm != null) {
-      // Promote so the next read of this block stays on the heap path.
-      tier.put(key, warm);
-    }
-    return warm;
   }
 
   public void put(BlockKey key, byte[] block) {
@@ -73,6 +87,14 @@ public final class BlockCache {
    * {@code true}. {@link io.github.zznate.vectorstore.core.cache.CachePolicy#MINIMAL}
    * callers pass {@code false} so cold blocks for those indexes never warm
    * the off-heap tier.
+   *
+   * <p>If the L2 tier rejects an oversized payload (e.g. cache budget
+   * smaller than {@code blockSize}, or any other tier-specific limit
+   * exceeded), the L1 tier still holds the entry and the L2 inconsistency
+   * surfaces as an {@link IllegalArgumentException} to the caller. In
+   * normal block-cache flows this never fires — every payload is exactly
+   * {@code blockSize} or smaller — so the exception is a configuration
+   * signal, not a runtime path.
    */
   public void put(BlockKey key, byte[] block, boolean useL2) {
     tier.put(key, block);

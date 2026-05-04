@@ -65,6 +65,34 @@ class ChainedL2ProviderTest {
   }
 
   @Test
+  void bottomTierHitPromotesByExactlyOneLevel() {
+    // Three-tier chain: bottom hit must promote to middle ONLY, not to top.
+    // Subsequent reads of the same key would promote it further upward,
+    // so frequency-of-access gates how high a key climbs.
+    RecordingProvider top = new RecordingProvider("top");
+    RecordingProvider middle = new RecordingProvider("middle");
+    RecordingProvider bottom = new RecordingProvider("bottom");
+    bottom.put("k", new byte[] {7});
+    top.putCalls.set(0);
+    middle.putCalls.set(0);
+    bottom.putCalls.set(0);
+    ChainedL2Provider chain = new ChainedL2Provider(List.of(top, middle, bottom));
+
+    Optional<byte[]> hit = chain.get("k");
+
+    assertThat(hit).hasValueSatisfying(b -> assertThat(b).containsExactly(7));
+    assertThat(middle.putCalls.get())
+        .as("bottom hit promotes one level up — middle takes the put")
+        .isEqualTo(1);
+    assertThat(top.putCalls.get())
+        .as("top must not receive a put — promotion is single-level, not all-the-way-up")
+        .isZero();
+    assertThat(bottom.putCalls.get())
+        .as("bottom is the source; not re-put")
+        .isZero();
+  }
+
+  @Test
   void allMissReturnsEmpty() {
     RecordingProvider upper = new RecordingProvider("upper");
     RecordingProvider lower = new RecordingProvider("lower");

@@ -120,12 +120,14 @@ class SlabOffHeapL2ProviderTest {
   }
 
   @Test
-  void oversizedPutIsRejectedAtBlockSizeBoundary() {
+  void oversizedPutThrowsAtBlockSizeBoundary() {
     try (SlabOffHeapL2Provider provider =
         new SlabOffHeapL2Provider(MAX_BYTES, BLOCK_SIZE, null, "test")) {
       byte[] tooBig = new byte[BLOCK_SIZE + 1];
 
-      provider.put("k", tooBig);
+      assertThatThrownBy(() -> provider.put("k", tooBig))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("oversized");
 
       assertThat(provider.get("k")).isEmpty();
       assertThat(provider.stats().currentEntries()).isZero();
@@ -278,6 +280,24 @@ class SlabOffHeapL2ProviderTest {
     assertThatThrownBy(() -> new SlabOffHeapL2Provider(MAX_BYTES, 0, null))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("blockSize");
+  }
+
+  @Test
+  void closeUnregistersMeters() {
+    SimpleMeterRegistry registry = new SimpleMeterRegistry();
+    int meterCountBefore = registry.getMeters().size();
+
+    int cycles = 100;
+    for (int i = 0; i < cycles; i++) {
+      try (SlabOffHeapL2Provider provider =
+          new SlabOffHeapL2Provider(MAX_BYTES, BLOCK_SIZE, registry, "test-" + i)) {
+        provider.put("k", new byte[] {1});
+      }
+    }
+
+    assertThat(registry.getMeters())
+        .as("meters must return to baseline after close — distinct cache_name per cycle")
+        .hasSize(meterCountBefore);
   }
 
   @Test
