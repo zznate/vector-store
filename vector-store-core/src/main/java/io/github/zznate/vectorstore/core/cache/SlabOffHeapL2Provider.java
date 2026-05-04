@@ -219,7 +219,14 @@ public final class SlabOffHeapL2Provider implements L2Provider {
     }
     long projected = s.currentBytes.get() - existingLen + putLen;
     int available = s.freeSlots.size() + existingSlotsCredit;
-    List<Map.Entry<String, BlockEntry>> toEvict = new ArrayList<>();
+    if (projected <= perShardSoftCap && available > 0) {
+      // Hot-path fast exit: byte budget OK and a free slot is already
+      // available. Skip the ArrayList + LinkedHashMap iterator allocation
+      // entirely. List.of() is a shared singleton; downstream
+      // applyEvictions iterates it as a no-op.
+      return new PutPlan(existing, existingLen, existingSlot, List.of(), projected);
+    }
+    List<Map.Entry<String, BlockEntry>> toEvict = new ArrayList<>(2); // typical 1, headroom for 2
     Iterator<Map.Entry<String, BlockEntry>> it = s.entries.entrySet().iterator();
     while ((projected > perShardSoftCap || available == 0) && it.hasNext()) {
       Map.Entry<String, BlockEntry> oldest = it.next();

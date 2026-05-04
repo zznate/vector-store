@@ -220,9 +220,15 @@ public final class LmdbL2Provider implements L2Provider {
    */
   private PutPlan planPut(Shard s, String key, int putLen) {
     Long existingLen = s.lru.get(key);
-    long baseline = s.currentBytes.get() - (existingLen == null ? 0 : existingLen);
-    long projected = baseline + putLen;
-    List<Map.Entry<String, Long>> toEvict = new ArrayList<>();
+    long projected = s.currentBytes.get() - (existingLen == null ? 0 : existingLen) + putLen;
+    if (projected <= perShardSoftCap) {
+      // Hot-path fast exit: no eviction needed. Skip the ArrayList +
+      // LinkedHashMap iterator allocation entirely. List.of() is a
+      // shared singleton; downstream applyPutBookkeeping iterates it
+      // as a no-op.
+      return new PutPlan(existingLen, List.of(), projected);
+    }
+    List<Map.Entry<String, Long>> toEvict = new ArrayList<>(2); // typical 1, headroom for 2
     Iterator<Map.Entry<String, Long>> it = s.lru.entrySet().iterator();
     while (projected > perShardSoftCap && it.hasNext()) {
       Map.Entry<String, Long> oldest = it.next();
