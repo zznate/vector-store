@@ -381,6 +381,43 @@ class SlabOffHeapL2ProviderTest {
     }
   }
 
+  /**
+   * Regression test for the slot-credit hot-path bug. With 1 MiB total
+   * and 64 KiB block size, each shard has 2 slots; saturating every
+   * shard with 4 KiB payloads leaves byte usage far below the 95 %
+   * soft cap but {@code freeSlots} empty. An overwrite onto a key in a
+   * slot-saturated shard previously took {@code planPut}'s fast-exit
+   * branch (because {@code existingSlotsCredit = 1} pretended there
+   * was an available slot), then NPE'd inside {@code writeBytesToSlot}
+   * when {@code freeSlots.pollFirst()} returned null. The fix forces
+   * an additional eviction so a real free slot is staged before the
+   * persistent copy.
+   */
+  @Test
+  void overwriteOnSlotSaturatedShardDoesNotNpe() {
+    long oneMiB = 1L << 20;
+    int payloadBytes = 4 * 1024;
+    int totalKeys = 64;
+    try (SlabOffHeapL2Provider provider =
+        new SlabOffHeapL2Provider(oneMiB, BLOCK_SIZE, null, "test")) {
+      for (int i = 0; i < totalKeys; i++) {
+        provider.put("key-" + i, new byte[payloadBytes]);
+      }
+      // After the loop, every shard's freeSlots is empty (entries.size
+      // equals slotsPerShard) and bytes are well below the soft cap.
+      // Overwriting the most-recently-inserted key exercises the
+      // overwrite branch with an empty freeSlots — pre-fix this NPE'd.
+      String overwriteKey = "key-" + (totalKeys - 1);
+      byte[] marker = new byte[payloadBytes];
+      java.util.Arrays.fill(marker, (byte) 0xAB);
+      provider.put(overwriteKey, marker);
+
+      assertThat(provider.get(overwriteKey))
+          .hasValueSatisfying(b -> assertThat(b[0]).isEqualTo((byte) 0xAB));
+      assertThat(provider.stats().currentBytes()).isLessThanOrEqualTo(oneMiB);
+    }
+  }
+
   @Test
   void arenaIsClosedDeterministically() {
     SlabOffHeapL2Provider provider = new SlabOffHeapL2Provider(MAX_BYTES, BLOCK_SIZE, null, "test");

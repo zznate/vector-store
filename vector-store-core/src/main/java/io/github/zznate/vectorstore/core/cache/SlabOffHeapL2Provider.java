@@ -211,31 +211,31 @@ public final class SlabOffHeapL2Provider implements L2Provider {
     BlockEntry existing = s.entries.get(key);
     long existingLen = 0L;
     long existingSlot = 0L;
-    int existingSlotsCredit = 0;
     if (existing != null) {
       existingLen = existing.length();
       existingSlot = existing.slot();
-      existingSlotsCredit = 1;
     }
     long projected = s.currentBytes.get() - existingLen + putLen;
-    int available = s.freeSlots.size() + existingSlotsCredit;
-    if (projected <= perShardSoftCap && available > 0) {
+    if (projected <= perShardSoftCap && !s.freeSlots.isEmpty()) {
       // Hot-path fast exit: byte budget OK and a free slot is already
-      // available. Skip the ArrayList + LinkedHashMap iterator allocation
-      // entirely. List.of() is a shared singleton; downstream
-      // applyEvictions iterates it as a no-op.
+      // in freeSlots. Skip the ArrayList + LinkedHashMap iterator
+      // allocation entirely. The existing entry's slot does not count
+      // toward "available" here — applyNewEntry frees it only after
+      // writeBytesToSlot has popped a fresh slot, so a put that lands
+      // on a saturated shard with all slots in `entries` must evict
+      // a different entry to free a slot for the persistent copy.
       return new PutPlan(existing, existingLen, existingSlot, List.of(), projected);
     }
     List<Map.Entry<String, BlockEntry>> toEvict = new ArrayList<>(2); // typical 1, headroom for 2
     Iterator<Map.Entry<String, BlockEntry>> it = s.entries.entrySet().iterator();
-    while ((projected > perShardSoftCap || available == 0) && it.hasNext()) {
+    while ((projected > perShardSoftCap || s.freeSlots.size() + toEvict.size() == 0)
+        && it.hasNext()) {
       Map.Entry<String, BlockEntry> oldest = it.next();
       if (oldest.getKey().equals(key)) {
         continue;
       }
       toEvict.add(Map.entry(oldest.getKey(), oldest.getValue()));
       projected -= oldest.getValue().length();
-      available += 1;
     }
     return new PutPlan(existing, existingLen, existingSlot, toEvict, projected);
   }
