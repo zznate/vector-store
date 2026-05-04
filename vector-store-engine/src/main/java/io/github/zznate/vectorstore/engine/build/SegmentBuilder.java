@@ -75,10 +75,10 @@ import org.slf4j.LoggerFactory;
  * {@code phase=build|serialize} and the
  * {@code vectorstore.commit.segment_bytes} distribution summary.
  *
- * <p>Product quantisation is deliberately skipped in this phase — segments
- * use the {@code InlineVectors} feature and recall is served by the raw
- * vectors carried inline. Phase 3 or 4 can layer {@code FusedPQ} on the
- * same segment layout by adding a {@code pq.bin} sidecar next to
+ * <p>Product quantisation is deliberately skipped today — segments use
+ * the {@code InlineVectors} feature and recall is served by the raw
+ * vectors carried inline. {@code FusedPQ} can be layered on the same
+ * segment layout by adding a {@code pq.bin} sidecar next to
  * {@code graph.jvec} and switching the writer feature set.
  */
 @ApplicationScoped

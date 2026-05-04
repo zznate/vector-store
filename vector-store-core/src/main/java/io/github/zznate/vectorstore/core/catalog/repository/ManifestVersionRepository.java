@@ -21,7 +21,7 @@ public interface ManifestVersionRepository {
    * The {@code manifest_version} table grows monotonically with every
    * commit — capped at 1024 rows in SQL as a safety net so accidental
    * production use of this method cannot OOM the JVM. A long-running
-   * busy index needs version pruning (Phase 2+); see
+   * busy index needs version pruning; see
    * {@code project_rest_data_management.md} in project memory.
    */
   List<ManifestVersion> listByIndex(String indexId);

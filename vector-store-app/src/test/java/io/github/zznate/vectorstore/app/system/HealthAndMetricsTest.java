@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 /**
  * Verifies that management endpoints ({@code /q/health}, {@code /q/metrics},
  * {@code /q/openapi}) are reachable without authentication and that the
- * Phase 1 meters catalogued in {@code MetricNames} appear in the Prometheus
+ * meters catalogued in {@code MetricNames} appear in the Prometheus
  * scrape output even before any traffic flows.
  */
 @QuarkusTest

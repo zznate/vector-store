@@ -37,7 +37,7 @@ import org.roaringbitmap.RoaringBitmap;
  * tombstones (from {@code tombstones.roar}) and in-memory staged deletes.
  *
  * <p>The fan-out-and-merge pattern is intentional even when the active
- * segment list has size 1 — it is a Phase 1 invariant per
+ * segment list has size 1 — it is an architectural invariant per
  * {@code docs/design-notes.md} and keeps the code path agnostic to segment
  * count as the project grows into compaction and concurrent writers.
  *

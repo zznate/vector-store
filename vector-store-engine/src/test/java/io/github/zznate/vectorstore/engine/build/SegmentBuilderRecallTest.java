@@ -23,7 +23,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * Recall quality gate for the phase 2 build + search pipeline. Loads the
+ * Recall quality gate for the build + search pipeline. Loads the
  * pre-embedded Wikipedia ML corpus produced by
  * {@code vector-store-datagen}, builds a segment at the design-notes
  * default parameters, and runs 20 natural-language queries through the

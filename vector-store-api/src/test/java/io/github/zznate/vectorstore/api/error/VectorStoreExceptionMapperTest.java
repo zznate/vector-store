@@ -58,12 +58,12 @@ class VectorStoreExceptionMapperTest {
   }
 
   @Test
-  void notImplementedFormatsPromptNumberAndOperation() {
-    NotImplementedException ex = new NotImplementedException("vectors:put", 2);
+  void notImplementedFormatsOperation() {
+    NotImplementedException ex = new NotImplementedException("vectors:put");
 
     assertThat(ex.status()).isEqualTo(Status.NOT_IMPLEMENTED);
     assertThat(ex.errorCode()).isEqualTo("not_implemented");
-    assertThat(ex.getMessage()).isEqualTo("vectors:put lands in phase 2");
+    assertThat(ex.getMessage()).isEqualTo("vectors:put is not implemented");
   }
 
   @Test

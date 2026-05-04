@@ -43,7 +43,7 @@ import java.util.Map;
  *   <li><b>{@code beamWidth}</b> — candidate pool size during graph
  *       construction (the Vamana equivalent of HNSW's {@code ef_construction}).
  *       Higher → better recall, slower build. Typical range 100–500. 200
- *       matches Phase 1's cold-archive profile: build once, query many.
+ *       suits the cold-archive profile: build once, query many.
  *   <li><b>{@code neighborOverflow}</b> — multiplier applied to the
  *       neighbour pool during insertion. Larger values let the graph
  *       settle into better neighbourhoods at the cost of build time.
@@ -72,8 +72,8 @@ import java.util.Map;
  *       {@link CachePolicy#SMART}.
  *   <li><b>{@code cacheBytes}</b> — optional per-index byte hint. {@code null}
  *       defers to the global cache budget; a positive value caps how much of
- *       that budget the index may consume (advisory in Phase 2A; load-bearing
- *       once isolated arenas land). Negative values are rejected.
+ *       that budget the index may consume (advisory today; load-bearing once
+ *       isolated arenas land). Negative values are rejected.
  * </ul>
  */
 public record IndexBuildParams(

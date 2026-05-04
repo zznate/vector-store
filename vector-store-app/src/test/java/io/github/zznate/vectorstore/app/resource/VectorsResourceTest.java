@@ -7,8 +7,7 @@ import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.Test;
 
 /**
- * Keeps coverage of the vector-level surface's auth + scope enforcement
- * after the phase 2 implementations replaced the earlier 501 stubs.
+ * Keeps coverage of the vector-level surface's auth + scope enforcement.
  *
  * <p>The full put → commit → query round-trip and the metrics /
  * tombstones / dimension-validation assertions live in

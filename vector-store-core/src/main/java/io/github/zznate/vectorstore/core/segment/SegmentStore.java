@@ -8,11 +8,11 @@ import java.net.URI;
 
 /**
  * Seam between the vector-store service and whatever holds its segment
- * bytes. Phase 2 adds a local-disk implementation in
- * {@code vector-store-engine} that writes to a directory tree mirroring
- * the object-store layout from {@code docs/design-notes.md}. Phase 3
- * supplies an S3-backed implementation in {@code vector-store-storage};
- * consumers see no API change.
+ * bytes. A local-disk implementation in {@code vector-store-engine}
+ * writes to a directory tree mirroring the object-store layout from
+ * {@code docs/design-notes.md}; an S3-backed implementation in
+ * {@code vector-store-storage} satisfies the same interface for
+ * production deployments.
  */
 public interface SegmentStore {
 

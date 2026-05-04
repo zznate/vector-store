@@ -22,8 +22,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * End-to-end component tests for the phase 2 data plane: put -&gt; commit
- * -&gt; query, second commit captures only post-snapshot vectors,
+ * End-to-end component tests for the data plane: put -&gt; commit -&gt;
+ * query, second commit captures only post-snapshot vectors,
  * delete-then-query, query against an index with no commits.
  *
  * <p>Every test creates a fresh {@code demo/products} index so the

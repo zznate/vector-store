@@ -21,9 +21,10 @@ import org.slf4j.LoggerFactory;
 
 /**
  * {@link SegmentStore} backed by a local directory tree that mirrors the
- * S3 object-store layout from {@code docs/design-notes.md}. The Phase 2
- * implementation used end-to-end in dev and tests; Phase 3 swaps the
- * equivalent S3 implementation without consumer changes.
+ * S3 object-store layout from {@code docs/design-notes.md}. Used
+ * end-to-end in dev and tests; the equivalent S3 implementation in
+ * {@code vector-store-storage} satisfies the same interface for
+ * production deployments without consumer changes.
  *
  * <p>Graph files are memory-mapped once per segment and the
  * {@link ReaderSupplier} is cached so concurrent queries against the same

@@ -6,8 +6,7 @@ import java.util.Objects;
 /**
  * One vector enqueued into the write buffer. Attributes are carried through
  * the builder for eventual persistence into the per-segment attribute
- * sidecar; Phase 2 does not yet do anything with them beyond keeping them
- * alive for Phase 4 to pick up.
+ * sidecar; the buffer keeps them alive but does not yet write them out.
  */
 public record BufferEntry(String userId, float[] vector, Map<String, String> attributes) {
 

@@ -20,7 +20,7 @@ public final class MetricNames {
   /** Counter: vectors accepted into an index's write buffer. */
   public static final String PUT_VECTORS = "vectorstore.put.vectors";
 
-  // --- Commit (phase 2+) --------------------------------------------------
+  // --- Commit -------------------------------------------------------------
 
   /** Timer: wall time of a commit, broken down by phase tag. */
   public static final String COMMIT_DURATION = "vectorstore.commit.duration";
@@ -28,7 +28,7 @@ public final class MetricNames {
   /** DistributionSummary: bytes of the segment produced by a commit. */
   public static final String COMMIT_SEGMENT_BYTES = "vectorstore.commit.segment_bytes";
 
-  // --- Query (phase 2+) ---------------------------------------------------
+  // --- Query --------------------------------------------------------------
 
   /** Timer: wall time of a query fan-out + merge. */
   public static final String QUERY_DURATION = "vectorstore.query.duration";
@@ -36,7 +36,7 @@ public final class MetricNames {
   /** DistributionSummary: graph nodes visited during a query. */
   public static final String QUERY_NODES_VISITED = "vectorstore.query.nodes_visited";
 
-  // --- Storage (phase 3+) -------------------------------------------------
+  // --- Storage ------------------------------------------------------------
 
   /** Timer: ranged object-store GET latency, tagged by cache_hit. */
   public static final String STORAGE_GET_DURATION = "vectorstore.storage.get.duration";
@@ -44,7 +44,7 @@ public final class MetricNames {
   /** Counter: bytes transferred, tagged by direction. */
   public static final String STORAGE_GET_BYTES = "vectorstore.storage.get.bytes";
 
-  // --- Cache tiers (phase 5+) ---------------------------------------------
+  // --- Cache tiers --------------------------------------------------------
 
   /** Counter: cache hits, tagged by tier + cache_name. */
   public static final String CACHE_HIT = "vectorstore.cache.hit";
@@ -61,7 +61,7 @@ public final class MetricNames {
   /** Gauge: current entry count in a cache tier. */
   public static final String CACHE_ENTRIES_CURRENT = "vectorstore.cache.entries.current";
 
-  // --- Filter (phase 4+) --------------------------------------------------
+  // --- Filter -------------------------------------------------------------
 
   /** Timer: cost to compile a filter predicate into a Bits mask. */
   public static final String FILTER_COMPILE_DURATION = "vectorstore.filter.compile.duration";
