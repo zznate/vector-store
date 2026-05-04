@@ -3,7 +3,7 @@ package io.github.zznate.vectorstore.storage.cache;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import io.github.zznate.vectorstore.core.cache.L2Provider;
-import io.github.zznate.vectorstore.core.cache.OffHeapArenaL2Provider;
+import io.github.zznate.vectorstore.core.cache.SlabOffHeapL2Provider;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,13 +17,15 @@ import org.junit.jupiter.api.Test;
  */
 class BlockCacheTieredTest {
 
+  private static final int BLOCK_SIZE = 64 * 1024;
+
   private SimpleMeterRegistry registry;
-  private OffHeapArenaL2Provider l2;
+  private SlabOffHeapL2Provider l2;
 
   @BeforeEach
   void setUp() {
     registry = new SimpleMeterRegistry();
-    l2 = new OffHeapArenaL2Provider(1L << 20, registry, BlockCache.CACHE_NAME);
+    l2 = new SlabOffHeapL2Provider(1L << 20, BLOCK_SIZE, registry, BlockCache.CACHE_NAME);
   }
 
   @AfterEach

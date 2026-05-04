@@ -83,13 +83,14 @@ class L2DiskCacheIT extends AbstractResourceTest {
 
   @Test
   void diskTierServesAfterUpperTiersChurn() {
-    // Build a working set whose graph + sidecars span enough 64 KiB
-    // blocks that L1 (1 block) and L2 off-heap (2 blocks) cannot keep
-    // them all warm. Repeated random queries then force evictions in
-    // both upper tiers; subsequent hits land on the disk tier.
+    // Build a working set whose graph + sidecars span more 64 KiB blocks
+    // than L1 (1 block) plus L2 off-heap (16 slots / 2 per shard) can
+    // hold simultaneously. 8192 vectors push the segment well past the
+    // off-heap budget; repeated queries then force evictions and the
+    // disk tier serves the next reads.
     Random rng = new Random(SEED);
     List<VectorRow> rows = new ArrayList<>();
-    for (int i = 0; i < 1024; i++) {
+    for (int i = 0; i < 8192; i++) {
       rows.add(new VectorRow("v-" + i, randomUnit(rng)));
     }
     rows.add(new VectorRow("v-target", axisVector(0)));
@@ -104,10 +105,9 @@ class L2DiskCacheIT extends AbstractResourceTest {
     double diskHitsBefore = diskHitCount();
 
     // Eviction pass — many queries against varying directions to evict
-    // upper-tier blocks. With L1+L2 holding only 3 blocks total, blocks
-    // beyond the 3 most-recent must be re-fetched, and the disk tier
-    // serves any block we wrote during the warm pass. 100 queries gives
-    // generous headroom against any single non-deterministic pass.
+    // upper-tier blocks. With L1+L2 holding only ~17 blocks total against
+    // a much larger working set, blocks beyond that must be re-fetched
+    // and the disk tier serves any block we wrote during the warm pass.
     Random qRng = new Random(SEED + 1);
     int queries = 100;
     for (int i = 0; i < queries; i++) {

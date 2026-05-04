@@ -2,7 +2,7 @@ package io.github.zznate.vectorstore.storage.reader;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import io.github.zznate.vectorstore.core.cache.OffHeapArenaL2Provider;
+import io.github.zznate.vectorstore.core.cache.SlabOffHeapL2Provider;
 import io.github.zznate.vectorstore.storage.cache.BlockCache;
 import io.github.zznate.vectorstore.storage.cache.BlockKey;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -133,8 +133,8 @@ class BlockCachingRandomAccessReaderTest {
   @Test
   void useL2FalseSkipsOffHeapTierOnReadAndWrite() throws Exception {
     SimpleMeterRegistry localRegistry = new SimpleMeterRegistry();
-    OffHeapArenaL2Provider l2 =
-        new OffHeapArenaL2Provider(1L << 20, localRegistry, BlockCache.CACHE_NAME);
+    SlabOffHeapL2Provider l2 =
+        new SlabOffHeapL2Provider(1L << 20, BLOCK_SIZE, localRegistry, BlockCache.CACHE_NAME);
     try {
       BlockCache tieredCache = new BlockCache(1L << 20, localRegistry, l2);
       try (BlockCachingRandomAccessReader reader =

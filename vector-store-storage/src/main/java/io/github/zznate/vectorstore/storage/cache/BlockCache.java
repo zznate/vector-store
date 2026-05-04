@@ -7,7 +7,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 /**
  * Process-wide tiered cache of fixed-size object blocks. L1 is an on-heap
  * {@link HeapCacheTier}; an optional L2 {@link L2Provider} (typically the
- * off-heap {@code OffHeapArenaL2Provider}) sits behind L1 and serves
+ * off-heap {@code SlabOffHeapL2Provider}) sits behind L1 and serves
  * cold-on-heap reads without an object-store round trip. Writes are
  * write-through: every {@link #put(BlockKey, byte[])} populates both
  * tiers when L2 is configured.
