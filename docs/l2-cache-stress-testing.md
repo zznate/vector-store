@@ -1,8 +1,15 @@
 # L2 cache stress-testing plan
 
-> Status: planning. Lands as the testing follow-up to prompt 07a slice 1
-> (`LocalDiskL2Provider`) and the off-heap counterpart we already had
-> (`OffHeapArenaL2Provider`). No code in this document — research only.
+> **Updated post-redesign.** The original 2026-04 plan targeted the
+> custom `LocalDiskL2Provider` (mmap + sidecar + bump pointer) and the
+> per-entry-Arena `OffHeapArenaL2Provider`. Both are gone — the disk
+> tier now lives behind LMDB (`LmdbL2Provider`) and the off-heap tier
+> uses a slab allocator with one shared Arena (`SlabOffHeapL2Provider`).
+> Hazards specific to the deleted designs are struck through.
+>
+> The current harness lives at
+> `vector-store-core/src/test/java/.../cache/stress/`; see its
+> `README.md` for the operator-facing run instructions.
 
 ## Why this matters
 
@@ -64,79 +71,100 @@ new implementations (chained tier, S3-backed, etc.) plug in for free.
 
 ### Allocator boundary conditions
 
-8. **Bump-pointer wrap.** Many consecutive puts that wrap exactly at
-   `maxBytes`. Verify no overflow in offset arithmetic.
-9. **Wrap-then-overlap eviction.** A wrapped write that touches three
-   adjacent prior entries evicts all three; no partial eviction.
-10. **Same-size free-list reuse.** Invalidate, put same size, put same
-    size — second put bump-allocates; doesn't reuse the same slot
-    twice.
-11. **Free-list growth under pathological workload.** Repeatedly put
-    then invalidate millions of distinct sizes — does the free list
-    grow without bound? (Likely yes; need a cap.)
-12. **Oversized put.** Payload ≥ maxBytes returns silently without
-    side effects (no partial write, no torn allocOffset).
+> **Resolved by the slab + LMDB redesign.** The custom bump-pointer
+> allocator and free-list-by-size are gone. The slab tier has a fixed
+> slot pool with explicit eviction; LMDB owns its own on-disk layout.
+
+8. ~~**Bump-pointer wrap.**~~ No bump pointer.
+9. ~~**Wrap-then-overlap eviction.**~~ No wrap, no overlap.
+10. ~~**Same-size free-list reuse.**~~ No free-list-by-size.
+11. ~~**Free-list growth under pathological workload.**~~ No free-list.
+12. **Oversized put.** Both providers throw `IllegalArgumentException`
+    for `bytes.length > maxBytes` (LMDB) or `bytes.length > blockSize`
+    (slab) — loud rejection, not a silent drop. Covered by unit tests
+    in `LmdbL2ProviderTest` / `SlabOffHeapL2ProviderTest`.
 
 ### Persistence (disk only)
 
-13. **Clean restart preserves entries.** Open, write, close, reopen —
-    every entry's bytes match.
-14. **Corrupt sidecar → cold start.** Magic byte zeroed → empty cache
-    on restart, no crash.
-15. **Truncated sidecar → cold start.** Sidecar written half-way →
-    cold start; unread bytes do not surface.
-16. **Missing sidecar with intact data file → cold start.** Don't
-    return phantom hits derived from stale data-file contents.
-17. **Crash mid-persist.** Kill the JVM during `persist()` — atomic
-    rename should leave the prior sidecar intact (verify via
-    file-system state after externally interrupting `persist`).
-18. **Format version skew.** Bump `VERSION` in a synthesised sidecar
-    → cold start.
-19. **Bytes outside `maxBytes`.** Synthesised sidecar references
-    `offset + length > maxBytes` → cold start.
-20. **Repeated open/close cycles.** 1000+ cycles with random write
-    workloads. Each cycle's reload matches its predecessor's write
-    set.
+> **Most resolved by the LMDB swap.** LMDB owns durability, crash
+> safety, and disk integrity; the application no longer maintains a
+> sidecar. Format-version skew remains relevant via LMDB's own
+> versioning. Repeated open/close cycles are exercised by the
+> `LmdbL2ProviderRestartCycleTest` in the harness.
+
+13. **Clean restart preserves entries.** Covered by
+    `LmdbL2ProviderTest.warmRestartPreservesKeySet` (16 keys,
+    deterministic) and `LmdbL2ProviderRestartCycleTest` (20 default /
+    100 nightly cycles, randomised workload).
+14. ~~**Corrupt sidecar → cold start.**~~ No sidecar.
+15. ~~**Truncated sidecar → cold start.**~~ No sidecar.
+16. ~~**Missing sidecar with intact data file → cold start.**~~ No
+    sidecar; LMDB env is the single source of truth.
+17. ~~**Crash mid-persist.**~~ LMDB's copy-on-write makes this moot —
+    a partial commit rolls back via the txn machinery.
+18. **Format version skew.** LMDB has its own format versioning. Not
+    currently exercised by the harness; future work if we ever bump
+    the LMDB binding.
+19. ~~**Bytes outside `maxBytes`.**~~ LMDB's `mapsize` is the hard
+    ceiling; pre-emptive eviction at the soft cap (75 % of mapsize)
+    keeps the working set bounded.
+20. **Repeated open/close cycles.** Covered by
+    `LmdbL2ProviderRestartCycleTest`.
 
 ### Resource hygiene
 
-21. **Arena leak (off-heap).** Open / fill to capacity / close in a
-    loop — native memory does not grow unboundedly. Use
-    `ProcessHandle` + RSS sampling, or attach JFR.
-22. **File-handle leak (disk).** 10k open/close cycles do not exhaust
-    the process file-descriptor limit.
-23. **Mmap leak (disk).** `MappedByteBuffer` is not explicitly
-    unmapped in `close()` — relies on GC. On Windows specifically,
-    document any handle lingering. May need an explicit `Unsafe.invokeCleaner`
-    if leaks materialise (internal JDK API; deferred until evidence).
-24. **File-lock release.** After `close()`, another provider on the
-    same directory acquires the lock immediately — no orphaned lock.
+21. **Native memory growth (slab + LMDB).** Long-running workloads
+    must not leak native memory. The slab tier's single shared
+    `Arena.ofShared()` is closed deterministically in
+    `SlabOffHeapL2Provider.close()`; LMDB's `Env.close()` releases the
+    mmap. Covered by `L2ProviderSoakTest` (JFR
+    `jdk.NativeMemoryUsage` recording, minute-5-vs-end-of-run anchor
+    compare; Finding #21 below).
+22. **File-handle leak (LMDB).** Repeated open/close cycles must not
+    exhaust the process FD limit. Covered indirectly by
+    `LmdbL2ProviderRestartCycleTest`'s 20-cycle (default) /
+    100-cycle (nightly) churn.
+23. ~~**Mmap leak (disk).**~~ LMDB owns the mmap lifecycle.
+    `Env.close()` is deterministic; no `MappedByteBuffer` reliance on
+    GC.
+24. **File-lock release (LMDB).** LMDB's lock file is released on
+    `Env.close()`. Construction-time failure of a second provider on
+    the same directory is LMDB's responsibility; the harness doesn't
+    explicitly assert this but the close-during-read race tests prove
+    `close()` completes cleanly under contention.
 
 ### Lifecycle races
 
-25. **close() during get().** Reader holding the lock completes; close
-    waits; subsequent get returns Optional.empty (or a known
-    exception, document which).
-26. **Two providers on the same directory.** Second constructor
-    fails fast with `IOException`. The first still functions.
-27. **Restart while data file is being written by another process.**
-    Pathological but worth probing — the file lock should reject the
-    second opener.
+25. **close() during in-flight read.** Reader holding a shard lock
+    completes; close waits on the same lock; post-close `get()`
+    throws `IllegalStateException`, not SIGSEGV. Covered by
+    `closeWaitsForInFlightShardLockAndPostCloseGetThrows` in both
+    `LmdbL2ProviderTest` and `SlabOffHeapL2ProviderTest` (three-latch
+    protocol with `invalidateMatching`'s predicate as the natural
+    shard-lock injection point).
+26. **Two providers on the same directory (LMDB).** Construction-time
+    failure is LMDB's responsibility; not currently asserted by the
+    harness. Future work.
+27. ~~**Restart while data file is being written by another process.**~~
+    LMDB's lock semantics handle this; not currently exercised.
 
 ### Failure injection
 
-28. **Disk full mid-persist.** Mock filesystem returning ENOSPC.
-    Provider logs at WARN, doesn't crash, doesn't corrupt the
-    pre-persist sidecar.
-29. **Disk full mid-write.** Bump-allocator can't extend the data
-    file (it's pre-allocated, so this shouldn't happen — but verify
-    behaviour if the pre-allocate itself was incomplete).
-30. **mmap fails at construction.** Inadequate address space (32-bit
-    JVM? not our deployment target, but worth a smoke test) or
-    permission errors → `UncheckedIOException` with clear message;
-    no half-constructed provider visible to callers.
-31. **Index sidecar deleted while running.** Should not affect
-    in-memory state until `close()`; close re-creates it.
+> **Most resolved by the LMDB swap.** LMDB owns disk-full handling,
+> mmap construction errors, and crash recovery. The application's
+> only error path is `Env.MapFullException`, which the in-memory LRU
+> bookkeeping is designed around (state mutations follow
+> `txn.commit()`).
+
+28. ~~**Disk full mid-persist.**~~ LMDB owns persistence.
+29. ~~**Disk full mid-write.**~~ LMDB raises `MapFullException`; the
+    application logs at ERROR, rolls back the txn, and leaves
+    in-memory state untouched (Phase 3 lesson #8). Not currently
+    exercised by the harness.
+30. ~~**mmap fails at construction.**~~ LMDB's `Env.create().open(...)`
+    throws on construction failure; the constructor wraps the
+    directory creation in `UncheckedIOException`.
+31. ~~**Index sidecar deleted while running.**~~ No sidecar.
 
 ## Test framework approach
 
@@ -254,97 +282,117 @@ not preserved across reload, byte-accounting drift).
 
 | Layer | Tool | When |
 |---|---|---|
-| Concurrent stress | JUnit 5 + ExecutorService | Standard suite, every PR |
-| Property-based | jqwik | Standard suite, may need a longer timeout |
-| Interleaving | jcstress | Manual / nightly; not on PR critical path |
-| Failure injection | jimfs | Standard suite |
-| Soak | JUnit + JFR | Nightly tag-excluded |
-| Restart cycle | JUnit, parameterised | Standard suite |
+| Concurrent stress | JUnit 5 + Threads | Default suite (default intensity), nightly profile (full intensity) |
+| Property-based | jqwik | Default suite (100 tries) / nightly (1000 tries) |
+| Interleaving | jcstress | Operator-driven via `-Pjcstress` (compile-only today) |
+| Soak | JUnit + JFR | `@Tag("soak")`, opt-in via `-Psoak` |
+| Restart cycle | JUnit | Default suite (20 cycles) / nightly (100 cycles) |
 
-Add `jqwik`, `jimfs`, `jcstress` (test-scope) to the `vector-store-core`
-POM when slice 2/3 lands. Keep `jcstress` opt-in via a Maven profile —
-its build pipeline is intrusive.
+`jqwik` ships in the `vector-store-core` test scope; `jcstress` is gated
+behind the `-Pjcstress` Maven profile (its annotation processor + class
+generation is intrusive on default builds). `jimfs` is no longer used —
+the original failure-injection layer was scoped to the deleted
+`LocalDiskL2Provider`.
 
-## Findings in current code
+## Findings in legacy code (historical)
 
-Discovered during the slice-1 review. Items marked **🔥** block prompt
-07a's stated functionality and should be addressed inside slice 2 or
-3; the rest are deferred until the testing harness exposes them as
-real-world problems.
+> The findings below referred to the pre-redesign providers
+> (`LocalDiskL2Provider`, `OffHeapArenaL2Provider`). All concerns are
+> superseded by the LMDB + slab redesign or by the harness's
+> post-redesign findings #6 / #21 / #22 above. Retained only as a
+> design-history pointer; do not act on them as written.
 
-1. ~~**🔥 `LocalDiskL2Provider` cannot honor the prompt's 10 GiB default
-   `maxBytes`.**~~ **Resolved in slice 1 follow-up.** Switched from
-   `MappedByteBuffer` to `MemorySegment` via JDK 21's
-   `FileChannel.map(MapMode, long, long, Arena)` overload. The new
-   API is `long`-indexed throughout, so configurations >2 GiB succeed
-   at construction. As a bonus, the Arena owns the mapping lifecycle
-   so {@code close()} unmaps deterministically rather than relying on
-   GC — partially addresses finding #3 below for the disk path.
-   `supportsMaxBytesAbove2GiB` regression test pins the behaviour at
-   3 GiB (sparse, no actual allocation).
-2. **`OffHeapArenaL2Provider.currentBytes` is `AtomicLong` but only
-   mutated under lock.** Inconsistent — should be plain `long`, or
-   the lock should go (which would require rethinking the lifecycle
-   of the LinkedHashMap). Style only; flagged for the cleanup pass.
-3. ~~**`MappedByteBuffer` is never explicitly unmapped in
-   `LocalDiskL2Provider.close()`.**~~ **Resolved in slice 1
-   follow-up via Finding #1's `MemorySegment` switch.** The Arena
-   owns the mapping; `arena.close()` unmaps deterministically. Soak
-   tests in #15 should still verify no FD / RSS growth across many
-   open/close cycles, but we no longer rely on GC for cleanup.
-4. **Free-list has no growth cap.** `releaseToFreeList` adds to a
-   `Map<Integer, ArrayDeque<Long>>` keyed by exact byte size. A
-   workload that puts and invalidates many distinct sizes leaks
-   memory in the free-list itself (offsets are 8 bytes each, but
-   millions add up). Likely won't hit in normal use; a cap of N
-   buckets / total entries is a future-work item.
-5. **`evictOverlapping` is O(N) per put.** Iterates the entire
-   `entries` map looking for overlaps. Fine for our typical
-   working set (256-1000 entries) but worth measuring under
-   eviction churn. If it shows up in profiling, an interval-tree or
-   sorted-by-offset auxiliary index would amortise it.
-6. **Lock contention is the obvious throughput bottleneck.** Single
-   `ReentrantLock` around every operation. Acceptable for an L2
-   tier sized for read-heavy workloads, but throughput tests will
-   surface it. Striped locking (lock per shard, where shard is
-   `key.hashCode() % N`) is the natural future evolution.
-7. **`MappedByteBuffer` `put(int, byte[], int, int)` and `get(int,
-   byte[], int, int)` are absolute bulk operations introduced in JDK
-   13; not strictly required to be thread-safe per the JavaDoc.** The
-   single lock around them makes this moot, but if we ever try to
-   shed the lock the assumption needs revisiting (and may force
-   striping or a different access pattern).
-8. **No back-pressure on `put` when the lock is contended.** Threads
-   queue at the lock indefinitely. For `block` cache puts driven by
-   user queries, an unbounded queue under load could amplify latency
-   tail. Worth a brief look during the load tests.
+1. ~~`LocalDiskL2Provider` 2 GiB `maxBytes` cap.~~ Resolved by the
+   LMDB swap; `mapsize` is `long`-indexed.
+2. ~~`OffHeapArenaL2Provider.currentBytes` AtomicLong / lock
+   inconsistency.~~ The provider class is gone; the slab tier reads
+   `currentBytes` lock-free for stats / gauges and mutates under
+   shard lock.
+3. ~~`MappedByteBuffer` not explicitly unmapped.~~ LMDB owns the mmap;
+   `Env.close()` is deterministic.
+4. ~~Free-list growth.~~ No free-list-by-size; the slab uses a fixed
+   slot pool.
+5. ~~O(N) eviction overlap scan.~~ No bump pointer; eviction is
+   per-shard LRU iteration.
+6. **Lock contention.** Tracked as Finding #6 in the harness (per-shard
+   throughput plateau).
+7. ~~`MappedByteBuffer` thread-safety.~~ No `MappedByteBuffer`.
+8. ~~Unbounded put queue.~~ Both providers acquire shard locks
+   (per-key for slab, per-shard for LMDB) — no global queue.
 
-## Acceptance bar for the testing follow-up
+## Harness findings tracking
 
-Before declaring 07a complete:
+Three named findings have constants in the test source. Failure
+messages embed the captured quantitative payload so the operator can
+decide whether to investigate or tune.
 
-- [ ] All six concurrent stress scenarios pass against both providers
-      with N=16 threads, 100k ops each, three runs in a row.
-- [ ] Property-based test with 1000 random sequences of length 100
-      passes for both providers.
-- [ ] Restart-cycle test with 100 cycles passes.
-- [ ] Failure-injection scenarios all produce documented exceptions
-      and consistent post-state.
-- [ ] Soak test (30 min) shows no growth in RSS / fd count / heap
-      retained size beyond steady-state noise.
-- [ ] Finding #1 (the 2 GiB cap) is resolved, either by capping or
-      multi-segment.
+### Finding #6 — Per-shard contention (was: single-lock contention)
+
+- **Where:** `L2ScalingTest.readHeavyThroughputScalesAcrossThreads`.
+- **Default:** 1 thread → 4 threads on the slab provider, read-heavy.
+  System-property knobs (`l2.scaling.baseline.threads`,
+  `l2.scaling.target.threads`, `l2.scaling.multiplier`,
+  `l2.scaling.ops.per.thread`, `l2.scaling.curve.threads`) let larger
+  machines ramp up.
+- **Threshold:** `THROUGHPUT_SCALING_MULTIPLIER = 1.5` — target ≥ 1.5×
+  baseline.
+- **Follow-up:** striped-lock granularity tuning if the slab fails.
+- **LMDB note:** the diagnostic-curve method walks LMDB at
+  `1, 4, 8, 16` threads but doesn't gate on the multiplier; LMDB read
+  scaling is bounded by MVCC coordination, not the application-level
+  shard lock.
+
+### Finding #21 — Native memory growth (was: Arena allocation rate)
+
+- **Where:** `L2ProviderSoakTest.steadyStateHasBoundedNativeMemoryGrowth`.
+- **Measurement:** JFR `jdk.NativeMemoryUsage` events at one-minute
+  granularity. Anchor compare: minute-5 sample (post-warm-up baseline)
+  vs end-of-run sample.
+- **Threshold:** delta ≤ 5 % of the minute-5 baseline. Sample-to-sample
+  monotonicity is **not** asserted — RSS / heap fluctuates from JIT
+  compilation, GC mark cycles, and eviction churn.
+- **Follow-up:** Arena lifecycle audit; LMDB env page count check.
+
+### Finding #22 — Single-flight breakdown (NEW)
+
+- **Where:** `BlockCacheConcurrencyTest.singleFlightCollapsesConcurrentMissesAcross64Threads`.
+- **Measurement:** total `vectorstore.cache.miss` count after 64
+  threads × 1000 reads on 8 pre-seeded keys.
+- **Threshold:** `LOADER_INVOCATION_BUDGET_PER_KEY × KEY_COUNT` (= 32
+  with the defaults).
+- **Follow-up:** Caffeine config audit; `recordStats()` wiring check.
+
+## Acceptance bar (post-redesign)
+
+- [x] All six concurrent stress scenarios pass against the slab, LMDB,
+      and chain providers at default intensity (4 × 5k); nightly
+      intensity (16 × 100k) under `-Pstress-nightly`.
+- [x] jqwik property test runs 100 sequences (default) / 1000 sequences
+      (nightly) with no failures.
+- [x] Restart-cycle test runs 20 cycles (default) / 100 cycles
+      (nightly).
+- [x] `BlockCacheConcurrencyTest` asserts L1 miss count stays within
+      the single-flight budget.
+- [x] `closeDuringReadDoesNotCrash` test on both LMDB and slab.
+- [ ] `L2ProviderSoakTest` runs 30 minutes per provider with no growth
+      beyond the documented noise band (operator-driven via
+      `-Pstress-nightly,soak -Dl2.soak.duration=PT30M`).
+- [ ] jcstress smoke runs end-to-end (currently compile-only under
+      `-Pjcstress`; full execution is future work).
+- [x] Capture-path validation: temporarily lowering
+      `THROUGHPUT_SCALING_MULTIPLIER` (via
+      `-Dl2.scaling.multiplier=100`) confirms the harness fails with
+      the embedded quantitative payload.
 
 ## Open questions
 
-- Do we want a chaos-monkey-style test that randomly kills the JVM
-  via `Runtime.halt()` at varying points and validates restart
-  correctness? Effective for finding atomicity holes, expensive to
-  develop. Maybe slice 4.
-- Property-based testing depth — can jqwik run sequences long enough
-  (10k+ ops) to catch eventually-emergent bugs without hitting the
-  surefire timeout? May need a parallel Maven profile.
-- jcstress integration — opt-in via `mvn -Pjcstress`? Run on a
-  nightly job? Don't run at all and rely on the stress harness?
-  Defer the call until the harness is up and we see whether the
-  stress harness alone is catching enough.
+- Process-kill / hard-crash recovery harness. LMDB's copy-on-write
+  makes the most acute concerns moot, but a forking process-kill
+  harness is still future work.
+- Cross-platform validation. macOS local only until CI lands.
+- jcstress end-to-end execution. The smoke test class compiles under
+  `-Pjcstress` and the annotation processor populates
+  `META-INF/jcstress-tests/`; wiring `mvn verify -Pjcstress` to
+  actually fork worker JVMs requires either a shaded executable jar
+  or careful classpath plumbing through `exec-maven-plugin`. See the
+  harness README for the operator-driven invocation pattern.

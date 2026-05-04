@@ -9,6 +9,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -31,7 +32,9 @@ class LmdbL2ProviderRestartCycleTest {
 
   private static final long MAX_BYTES = 16L << 20;
   private static final int CYCLES_DEFAULT = 20;
+  private static final int CYCLES_NIGHTLY = 100;
   private static final int OPS_PER_CYCLE_DEFAULT = 200;
+  private static final int OPS_PER_CYCLE_NIGHTLY = 500;
   private static final int KEY_POOL = 64;
   private static final int PAYLOAD_MIN = 16;
   private static final int PAYLOAD_MAX = 4 * 1024;
@@ -41,15 +44,24 @@ class LmdbL2ProviderRestartCycleTest {
   void cumulativeRestartPreservesEverySnapshot(@TempDir Path tempDir) {
     Map<String, byte[]> oracle = new HashMap<>();
     for (int cycle = 0; cycle < CYCLES_DEFAULT; cycle++) {
-      runCycle(tempDir, oracle, cycle);
+      runCycle(tempDir, oracle, cycle, OPS_PER_CYCLE_DEFAULT);
     }
   }
 
-  private static void runCycle(Path tempDir, Map<String, byte[]> oracle, int cycle) {
+  @Tag("stress-nightly")
+  @Test
+  void cumulativeRestartPreservesEverySnapshotNightly(@TempDir Path tempDir) {
+    Map<String, byte[]> oracle = new HashMap<>();
+    for (int cycle = 0; cycle < CYCLES_NIGHTLY; cycle++) {
+      runCycle(tempDir, oracle, cycle, OPS_PER_CYCLE_NIGHTLY);
+    }
+  }
+
+  private static void runCycle(Path tempDir, Map<String, byte[]> oracle, int cycle, int opsPerCycle) {
     long seed = BASE_SEED + cycle;
     try (LmdbL2Provider provider =
         new LmdbL2Provider(tempDir, MAX_BYTES, new SimpleMeterRegistry(), "restart-cycle")) {
-      applySequence(provider, oracle, seed, OPS_PER_CYCLE_DEFAULT);
+      applySequence(provider, oracle, seed, opsPerCycle);
     }
     Map<String, byte[]> snapshot = new HashMap<>(oracle);
     try (LmdbL2Provider reopened =

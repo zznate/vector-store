@@ -17,6 +17,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.stream.Stream;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -60,7 +61,18 @@ class L2ProviderStressTest {
   @ParameterizedTest(name = "{0} × {1}")
   @MethodSource("scenarioByProvider")
   void defaultIntensityRunsClean(StressScenario scenario, ProviderKind kind, @TempDir Path tempDir) {
-    StressConfig config = scenario.defaultConfig(kind, SEED);
+    runIntensity(scenario, kind, tempDir, scenario.defaultConfig(kind, SEED));
+  }
+
+  @Tag("stress-nightly")
+  @ParameterizedTest(name = "{0} × {1}")
+  @MethodSource("scenarioByProvider")
+  void nightlyIntensityRunsClean(StressScenario scenario, ProviderKind kind, @TempDir Path tempDir) {
+    runIntensity(scenario, kind, tempDir, scenario.nightlyConfig(kind, SEED));
+  }
+
+  private void runIntensity(
+      StressScenario scenario, ProviderKind kind, Path tempDir, StressConfig config) {
     MeterRegistry registry = new SimpleMeterRegistry();
     L2Provider provider = newProvider(scenario, kind, tempDir, registry);
     try {
