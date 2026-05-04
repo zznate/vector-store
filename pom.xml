@@ -62,6 +62,7 @@
     <assertj.version>3.27.3</assertj.version>
     <aws.sdk.version>2.32.2</aws.sdk.version>
     <caffeine.version>3.2.0</caffeine.version>
+    <lmdbjava.version>0.9.1</lmdbjava.version>
     <roaringbitmap.version>1.3.0</roaringbitmap.version>
     <testcontainers.version>1.21.3</testcontainers.version>
     <mockito.version>5.14.2</mockito.version>
@@ -79,14 +80,18 @@
     <build.helper.plugin.version>3.6.0</build.helper.plugin.version>
 
     <!--
-      JVM flags required by JVector's Panama Vector API code path and by
-      the foreign-memory L2 cache (Arena / MemorySegment). FFM is final
-      in JDK 22 but preview in JDK 21, so the enable-preview flag is
-      needed until we upgrade. Surefire and Failsafe both apply these so
-      tests exercise both the SIMD and FFM paths. Runtime needs the same
-      flags via JAVA_TOOL_OPTIONS / container ENTRYPOINT.
+      JVM flags required by JVector's Panama Vector API code path, the
+      foreign-memory L2 cache (Arena / MemorySegment), and LMDB Java's
+      PROXY_OPTIMAL proxy. FFM is final in JDK 22 but preview in JDK 21,
+      so the enable-preview flag is needed until we upgrade. The two
+      add-opens flags expose java.nio.Buffer.address and
+      sun.nio.ch.DirectBuffer to LMDB Java's Unsafe-based PROXY_OPTIMAL
+      (~2.3x faster gets vs PROXY_SAFE per the pre-Phase-3 spike).
+      Surefire and Failsafe both apply these so tests exercise the same
+      JVM surface as runtime; runtime needs the same flags via
+      JAVA_TOOL_OPTIONS / container ENTRYPOINT.
     -->
-    <vectorstore.test.jvm.args>--add-modules=jdk.incubator.vector --enable-native-access=ALL-UNNAMED --enable-preview</vectorstore.test.jvm.args>
+    <vectorstore.test.jvm.args>--add-modules=jdk.incubator.vector --enable-native-access=ALL-UNNAMED --enable-preview --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED</vectorstore.test.jvm.args>
 
     <!-- Skip unnecessary steps in non-app modules by default -->
     <skipITs>false</skipITs>
@@ -135,6 +140,13 @@
         <groupId>com.github.ben-manes.caffeine</groupId>
         <artifactId>caffeine</artifactId>
         <version>${caffeine.version}</version>
+      </dependency>
+
+      <!-- LMDB Java binding for the L2 disk-tier provider -->
+      <dependency>
+        <groupId>org.lmdbjava</groupId>
+        <artifactId>lmdbjava</artifactId>
+        <version>${lmdbjava.version}</version>
       </dependency>
 
       <!-- RoaringBitmap pinned here for both phase 3 and the phase 4 tombstones -->

@@ -3,7 +3,7 @@ package io.github.zznate.vectorstore.storage.cache;
 import io.github.zznate.vectorstore.core.cache.CacheConfig;
 import io.github.zznate.vectorstore.core.cache.ChainedL2Provider;
 import io.github.zznate.vectorstore.core.cache.L2Provider;
-import io.github.zznate.vectorstore.core.cache.LocalDiskL2Provider;
+import io.github.zznate.vectorstore.core.cache.LmdbL2Provider;
 import io.github.zznate.vectorstore.core.cache.OffHeapArenaL2Provider;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -28,7 +28,7 @@ import org.slf4j.LoggerFactory;
  *   <li>{@code vectorstore.cache.block.l2.*} — off-heap arena tier
  *       ({@link OffHeapArenaL2Provider}).</li>
  *   <li>{@code vectorstore.cache.block.l2-disk.*} — persistent disk tier
- *       ({@link LocalDiskL2Provider}).</li>
+ *       ({@link LmdbL2Provider}).</li>
  * </ul>
  *
  * <p>When both tiers are enabled they compose behind a {@link
@@ -76,7 +76,7 @@ public class BlockCacheProducer {
    *
    * <ul>
    *   <li>{@code null} if neither L2 tier is enabled.</li>
-   *   <li>A bare {@link OffHeapArenaL2Provider} or {@link LocalDiskL2Provider}
+   *   <li>A bare {@link OffHeapArenaL2Provider} or {@link LmdbL2Provider}
    *       if exactly one is enabled.</li>
    *   <li>A {@link ChainedL2Provider} of {@code [offheap, disk]} if both are
    *       enabled — read path tries off-heap first, then disk.</li>
@@ -97,7 +97,7 @@ public class BlockCacheProducer {
     if (diskEnabled) {
       Path path = ensureDiskPathWritable(config.block().l2Disk().path());
       tiers.add(
-          new LocalDiskL2Provider(
+          new LmdbL2Provider(
               path, config.block().l2Disk().bytes(), meterRegistry, BlockCache.CACHE_NAME));
     }
     return tiers.size() == 1 ? tiers.get(0) : new ChainedL2Provider(tiers);

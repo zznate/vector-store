@@ -74,6 +74,12 @@
       <artifactId>caffeine</artifactId>
     </dependency>
 
+    <!-- LMDB Java backs the L2 disk-tier provider. -->
+    <dependency>
+      <groupId>org.lmdbjava</groupId>
+      <artifactId>lmdbjava</artifactId>
+    </dependency>
+
     <!-- Micrometer API for the cache-tier metrics surface. -->
     <dependency>
       <groupId>io.micrometer</groupId>
