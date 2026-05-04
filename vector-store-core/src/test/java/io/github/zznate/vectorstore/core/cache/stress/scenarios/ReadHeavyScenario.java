@@ -37,7 +37,8 @@ public final class ReadHeavyScenario implements StressScenario {
         OP_MIX,
         StressConfig.Mode.TIGHT,
         seed,
-        /* sampleEveryOps= */ 100);
+        /* sampleEveryOps= */ 100,
+        /* periodicInvalidateAllInterval= */ null);
   }
 
   @Override
@@ -52,7 +53,8 @@ public final class ReadHeavyScenario implements StressScenario {
         OP_MIX,
         StressConfig.Mode.TIGHT,
         seed,
-        /* sampleEveryOps= */ 1_000);
+        /* sampleEveryOps= */ 1_000,
+        /* periodicInvalidateAllInterval= */ null);
   }
 
   @Override

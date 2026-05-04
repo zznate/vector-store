@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 class SlabOffHeapL2ProviderTest {
@@ -386,6 +388,71 @@ class SlabOffHeapL2ProviderTest {
 
     provider.close(); // must not throw
 
+    assertThatThrownBy(() -> provider.get("k")).isInstanceOf(IllegalStateException.class);
+  }
+
+  /**
+   * Close-during-read race: T1 holds all shard locks via a blocking
+   * predicate inside {@code invalidateMatching}; T2 calls {@code close()}
+   * and queues on shard-lock acquisition; T1 releases; T2 proceeds and
+   * closes the shared {@code Arena}; T3 (post-close) sees
+   * {@code IllegalStateException}, not SIGSEGV. {@code invalidateMatching}
+   * is the natural injection point — its predicate runs while every
+   * shard lock is held, mirroring the lock ownership a {@code get()}
+   * would briefly hold around the {@code MemorySegment.copy}.
+   */
+  @Test
+  void closeWaitsForInFlightShardLockAndPostCloseGetThrows() throws Exception {
+    SlabOffHeapL2Provider provider =
+        new SlabOffHeapL2Provider(MAX_BYTES, BLOCK_SIZE, null, "test");
+    provider.put("k", new byte[] {1, 2, 3});
+
+    CountDownLatch t1Inside = new CountDownLatch(1);
+    CountDownLatch t1MayProceed = new CountDownLatch(1);
+    CountDownLatch t2CloseFinished = new CountDownLatch(1);
+    AtomicReference<Throwable> t1Error = new AtomicReference<>();
+
+    Thread t1 =
+        new Thread(
+            () -> {
+              try {
+                provider.invalidateMatching(
+                    k -> {
+                      t1Inside.countDown();
+                      try {
+                        t1MayProceed.await();
+                      } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                      }
+                      return false;
+                    });
+              } catch (Throwable t) {
+                t1Error.set(t);
+              }
+            },
+            "t1-shard-lock-holder");
+    t1.start();
+    t1Inside.await();
+
+    Thread t2 =
+        new Thread(
+            () -> {
+              provider.close();
+              t2CloseFinished.countDown();
+            },
+            "t2-close");
+    t2.start();
+
+    // Give T2 time to enter close() and queue on the shard locks. There
+    // is no public API to ask "is T2 currently waiting on this
+    // ReentrantLock"; tune upward if the test flakes on slow machines.
+    Thread.sleep(50);
+
+    t1MayProceed.countDown();
+    t2CloseFinished.await();
+    t1.join();
+
+    assertThat(t1Error.get()).isNull();
     assertThatThrownBy(() -> provider.get("k")).isInstanceOf(IllegalStateException.class);
   }
 }

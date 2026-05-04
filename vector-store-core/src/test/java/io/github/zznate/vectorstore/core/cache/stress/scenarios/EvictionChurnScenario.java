@@ -42,7 +42,8 @@ public final class EvictionChurnScenario implements StressScenario {
         OP_MIX,
         StressConfig.Mode.EVICTION_AWARE,
         seed,
-        /* sampleEveryOps= */ 100);
+        /* sampleEveryOps= */ 100,
+        /* periodicInvalidateAllInterval= */ null);
   }
 
   @Override
@@ -57,7 +58,8 @@ public final class EvictionChurnScenario implements StressScenario {
         OP_MIX,
         StressConfig.Mode.EVICTION_AWARE,
         seed,
-        /* sampleEveryOps= */ 1_000);
+        /* sampleEveryOps= */ 1_000,
+        /* periodicInvalidateAllInterval= */ null);
   }
 
   @Override

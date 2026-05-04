@@ -4,22 +4,27 @@ import io.github.zznate.vectorstore.core.cache.stress.OpMix;
 import io.github.zznate.vectorstore.core.cache.stress.ProviderKind;
 import io.github.zznate.vectorstore.core.cache.stress.StressConfig;
 import io.github.zznate.vectorstore.core.cache.stress.StressScenario;
+import java.time.Duration;
 
 /**
- * 10/80/10 (get/put/invalidate) at uniform sizing across providers.
- * Stresses the write path: most ops are puts that overwrite into the
- * key pool, with a 10% trickle of invalidates exercising the
- * remove-and-reuse-slot path. Tight mode: working set stays well under
- * {@code maxBytes / 2}.
+ * Four worker threads at a 30/60/10 op mix plus an auxiliary thread
+ * that calls {@code provider.invalidateAll()} every
+ * {@value #INVALIDATOR_INTERVAL_MILLIS} ms under the harness's
+ * write-lock. Exercises the bulk-clear path against concurrent per-key
+ * mutations; tight mode requires the harness to keep oracle and
+ * provider in sync across each invalidate-all boundary.
  */
-public final class WriteHeavyScenario implements StressScenario {
+public final class PeriodicInvalidateAllScenario implements StressScenario {
 
-  public static final String NAME = "write-heavy";
+  public static final String NAME = "periodic-invalidate-all";
 
   private static final int KEY_POOL_SIZE = 64;
   private static final int PAYLOAD_BYTES = 4 * 1024;
   private static final long MAX_BYTES = 16L << 20;
-  private static final OpMix OP_MIX = new OpMix(10, 80, 10);
+  private static final OpMix OP_MIX = new OpMix(30, 60, 10);
+  private static final long INVALIDATOR_INTERVAL_MILLIS = 50L;
+  private static final Duration INVALIDATOR_INTERVAL =
+      Duration.ofMillis(INVALIDATOR_INTERVAL_MILLIS);
 
   @Override
   public String name() {
@@ -39,7 +44,7 @@ public final class WriteHeavyScenario implements StressScenario {
         StressConfig.Mode.TIGHT,
         seed,
         /* sampleEveryOps= */ 100,
-        /* periodicInvalidateAllInterval= */ null);
+        INVALIDATOR_INTERVAL);
   }
 
   @Override
@@ -55,7 +60,7 @@ public final class WriteHeavyScenario implements StressScenario {
         StressConfig.Mode.TIGHT,
         seed,
         /* sampleEveryOps= */ 1_000,
-        /* periodicInvalidateAllInterval= */ null);
+        INVALIDATOR_INTERVAL);
   }
 
   @Override

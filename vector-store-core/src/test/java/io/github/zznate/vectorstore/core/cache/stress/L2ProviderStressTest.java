@@ -7,7 +7,10 @@ import io.github.zznate.vectorstore.core.cache.L2Provider;
 import io.github.zznate.vectorstore.core.cache.LmdbL2Provider;
 import io.github.zznate.vectorstore.core.cache.SlabOffHeapL2Provider;
 import io.github.zznate.vectorstore.core.cache.stress.scenarios.EvictionChurnScenario;
+import io.github.zznate.vectorstore.core.cache.stress.scenarios.MixedSizeScenario;
+import io.github.zznate.vectorstore.core.cache.stress.scenarios.PeriodicInvalidateAllScenario;
 import io.github.zznate.vectorstore.core.cache.stress.scenarios.ReadHeavyScenario;
+import io.github.zznate.vectorstore.core.cache.stress.scenarios.SameKeyContentionScenario;
 import io.github.zznate.vectorstore.core.cache.stress.scenarios.WriteHeavyScenario;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -40,7 +43,13 @@ class L2ProviderStressTest {
 
   static Stream<Arguments> scenarioByProvider() {
     List<StressScenario> scenarios =
-        List.of(new ReadHeavyScenario(), new WriteHeavyScenario(), new EvictionChurnScenario());
+        List.of(
+            new ReadHeavyScenario(),
+            new WriteHeavyScenario(),
+            new EvictionChurnScenario(),
+            new SameKeyContentionScenario(),
+            new MixedSizeScenario(),
+            new PeriodicInvalidateAllScenario());
     return scenarios.stream()
         .flatMap(
             s ->

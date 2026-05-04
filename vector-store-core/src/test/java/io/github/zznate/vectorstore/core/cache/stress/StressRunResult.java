@@ -17,6 +17,7 @@ public record StressRunResult(
     long getCount,
     long putCount,
     long invalidateCount,
+    long invalidateAllCount,
     long getHits,
     long getMisses,
     long peakBytes,

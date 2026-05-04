@@ -6,20 +6,20 @@ import io.github.zznate.vectorstore.core.cache.stress.StressConfig;
 import io.github.zznate.vectorstore.core.cache.stress.StressScenario;
 
 /**
- * 10/80/10 (get/put/invalidate) at uniform sizing across providers.
- * Stresses the write path: most ops are puts that overwrite into the
- * key pool, with a 10% trickle of invalidates exercising the
- * remove-and-reuse-slot path. Tight mode: working set stays well under
- * {@code maxBytes / 2}.
+ * Eight threads racing on a four-key pool with a 30/60/10 op mix —
+ * the put path is hot for every thread on every key, so per-key
+ * compute serialisation in the harness is exercised continuously.
+ * Tight mode: working-set bytes (4 keys × 4 KiB = 16 KiB) stay far
+ * below {@code maxBytes / 2}.
  */
-public final class WriteHeavyScenario implements StressScenario {
+public final class SameKeyContentionScenario implements StressScenario {
 
-  public static final String NAME = "write-heavy";
+  public static final String NAME = "same-key-contention";
 
-  private static final int KEY_POOL_SIZE = 64;
+  private static final int KEY_POOL_SIZE = 4;
   private static final int PAYLOAD_BYTES = 4 * 1024;
   private static final long MAX_BYTES = 16L << 20;
-  private static final OpMix OP_MIX = new OpMix(10, 80, 10);
+  private static final OpMix OP_MIX = new OpMix(30, 60, 10);
 
   @Override
   public String name() {
@@ -30,7 +30,7 @@ public final class WriteHeavyScenario implements StressScenario {
   public StressConfig defaultConfig(ProviderKind kind, long seed) {
     return new StressConfig(
         NAME,
-        /* threads= */ 4,
+        /* threads= */ 8,
         /* opsPerThread= */ 5_000,
         KEY_POOL_SIZE,
         PAYLOAD_BYTES,

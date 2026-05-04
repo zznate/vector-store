@@ -1,5 +1,7 @@
 package io.github.zznate.vectorstore.core.cache.stress;
 
+import java.time.Duration;
+
 /**
  * Workload parameters for one run of {@link L2ProviderStressHarness}.
  * Threads × opsPerThread = total ops; each worker draws ops from the
@@ -11,6 +13,12 @@ package io.github.zznate.vectorstore.core.cache.stress;
  * so no eviction can happen. {@link Mode#EVICTION_AWARE} runs assert
  * only the relaxed invariants (bounded bytes, non-zero eviction
  * counter, no exceptions).
+ *
+ * <p>{@link #periodicInvalidateAllInterval()} enables an auxiliary
+ * thread that calls {@code provider.invalidateAll()} every interval
+ * under a write-lock that excludes worker mutations — necessary so
+ * the bulk clear stays atomic against per-key compute paths.
+ * {@code null} disables the auxiliary thread.
  */
 public record StressConfig(
     String scenarioName,
@@ -22,7 +30,8 @@ public record StressConfig(
     OpMix opMix,
     Mode mode,
     long seed,
-    int sampleEveryOps) {
+    int sampleEveryOps,
+    Duration periodicInvalidateAllInterval) {
 
   public StressConfig {
     if (threads <= 0) {
@@ -40,6 +49,11 @@ public record StressConfig(
     }
     if (sampleEveryOps <= 0) {
       throw new IllegalArgumentException("sampleEveryOps must be > 0, got " + sampleEveryOps);
+    }
+    if (periodicInvalidateAllInterval != null
+        && (periodicInvalidateAllInterval.isZero() || periodicInvalidateAllInterval.isNegative())) {
+      throw new IllegalArgumentException(
+          "periodicInvalidateAllInterval must be positive, got " + periodicInvalidateAllInterval);
     }
   }
 

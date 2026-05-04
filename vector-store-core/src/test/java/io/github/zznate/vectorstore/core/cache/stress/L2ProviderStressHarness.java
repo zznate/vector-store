@@ -13,7 +13,10 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
  * Drives a {@link L2Provider} through a configured workload of N worker
@@ -27,6 +30,12 @@ import java.util.concurrent.atomic.AtomicLong;
  * per-bin lock while it both writes to the provider and updates the
  * oracle, so concurrent puts/invalidates of the same key are observed
  * in the same order by both views. Reads bypass the oracle.
+ *
+ * <p>A {@link ReadWriteLock} layers above the per-key compute paths so
+ * the optional periodic-invalidate-all auxiliary thread can take a
+ * write-lock to atomically clear both provider and oracle. Workers hold
+ * the read-lock for the duration of their compute lambda, so the bulk
+ * clear cannot interleave with a half-finished mutation.
  *
  * <p>End-of-run verification splits by {@link StressConfig.Mode}:
  * tight mode asserts oracle-equality and exact byte accounting; eviction-
@@ -48,6 +57,7 @@ public final class L2ProviderStressHarness {
     private final ConcurrentHashMap<String, byte[]> oracle = new ConcurrentHashMap<>();
     private final Counters counters = new Counters();
     private final List<Throwable> exceptions = Collections.synchronizedList(new ArrayList<>());
+    private final ReadWriteLock oracleLock = new ReentrantReadWriteLock();
 
     Run(L2Provider provider, StressConfig cfg) {
       this.provider = provider;
@@ -56,7 +66,7 @@ public final class L2ProviderStressHarness {
 
     StressRunResult execute() {
       Instant t0 = Instant.now();
-      runWorkers();
+      runWorkersAndInvalidator();
       Duration wallClock = Duration.between(t0, Instant.now());
 
       StressRunResult result = buildResult(wallClock);
@@ -64,7 +74,15 @@ public final class L2ProviderStressHarness {
       return result;
     }
 
-    private void runWorkers() {
+    private void runWorkersAndInvalidator() {
+      AtomicBoolean stop = new AtomicBoolean(false);
+      Thread invalidator = startInvalidatorIfConfigured(stop);
+      Thread[] workers = startWorkers();
+      joinAll(workers);
+      stopInvalidator(invalidator, stop);
+    }
+
+    private Thread[] startWorkers() {
       Thread[] workers = new Thread[cfg.threads()];
       for (int i = 0; i < cfg.threads(); i++) {
         final int idx = i;
@@ -75,7 +93,35 @@ public final class L2ProviderStressHarness {
       for (Thread t : workers) {
         t.start();
       }
-      joinAll(workers);
+      return workers;
+    }
+
+    private Thread startInvalidatorIfConfigured(AtomicBoolean stop) {
+      if (cfg.periodicInvalidateAllInterval() == null) {
+        return null;
+      }
+      Thread t =
+          new Thread(
+              () -> runInvalidator(cfg.periodicInvalidateAllInterval(), stop),
+              "stress-" + cfg.scenarioName() + "-invalidator");
+      t.setDaemon(true);
+      t.setUncaughtExceptionHandler((th, e) -> exceptions.add(e));
+      t.start();
+      return t;
+    }
+
+    private void stopInvalidator(Thread invalidator, AtomicBoolean stop) {
+      if (invalidator == null) {
+        return;
+      }
+      stop.set(true);
+      invalidator.interrupt();
+      try {
+        invalidator.join();
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        exceptions.add(e);
+      }
     }
 
     private void joinAll(Thread[] workers) {
@@ -102,6 +148,28 @@ public final class L2ProviderStressHarness {
                   "scenario %s: currentBytes %d exceeded maxBytes %d during run",
                   cfg.scenarioName(), current, maxBytes)
               .isLessThanOrEqualTo(maxBytes);
+        }
+      }
+    }
+
+    private void runInvalidator(Duration interval, AtomicBoolean stop) {
+      while (!stop.get()) {
+        try {
+          Thread.sleep(interval.toMillis());
+        } catch (InterruptedException e) {
+          Thread.currentThread().interrupt();
+          return;
+        }
+        if (stop.get()) {
+          return;
+        }
+        oracleLock.writeLock().lock();
+        try {
+          provider.invalidateAll();
+          oracle.clear();
+          counters.invalidateAllCount.incrementAndGet();
+        } finally {
+          oracleLock.writeLock().unlock();
         }
       }
     }
@@ -133,23 +201,33 @@ public final class L2ProviderStressHarness {
               : cfg.payloadMin() + rng.nextInt(cfg.payloadMax() - cfg.payloadMin() + 1);
       byte[] payload = new byte[len];
       rng.nextBytes(payload);
-      oracle.compute(
-          key,
-          (k, prior) -> {
-            provider.put(k, payload);
-            counters.putCount.incrementAndGet();
-            return payload;
-          });
+      oracleLock.readLock().lock();
+      try {
+        oracle.compute(
+            key,
+            (k, prior) -> {
+              provider.put(k, payload);
+              counters.putCount.incrementAndGet();
+              return payload;
+            });
+      } finally {
+        oracleLock.readLock().unlock();
+      }
     }
 
     private void doInvalidate(String key) {
-      oracle.compute(
-          key,
-          (k, prior) -> {
-            provider.invalidate(k);
-            counters.invalidateCount.incrementAndGet();
-            return null;
-          });
+      oracleLock.readLock().lock();
+      try {
+        oracle.compute(
+            key,
+            (k, prior) -> {
+              provider.invalidate(k);
+              counters.invalidateCount.incrementAndGet();
+              return null;
+            });
+      } finally {
+        oracleLock.readLock().unlock();
+      }
     }
 
     private StressRunResult buildResult(Duration wallClock) {
@@ -162,6 +240,7 @@ public final class L2ProviderStressHarness {
           counters.getCount.get(),
           counters.putCount.get(),
           counters.invalidateCount.get(),
+          counters.invalidateAllCount.get(),
           counters.getHits.get(),
           counters.getMisses.get(),
           counters.peakBytes.get(),
@@ -255,6 +334,7 @@ public final class L2ProviderStressHarness {
     final AtomicLong getCount = new AtomicLong();
     final AtomicLong putCount = new AtomicLong();
     final AtomicLong invalidateCount = new AtomicLong();
+    final AtomicLong invalidateAllCount = new AtomicLong();
     final AtomicLong getHits = new AtomicLong();
     final AtomicLong getMisses = new AtomicLong();
     final AtomicLong peakBytes = new AtomicLong();
